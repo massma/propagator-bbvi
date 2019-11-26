@@ -1,0 +1,3 @@
+* playing around with bbvi and propagatos
+
+specifically trying to automate rao-blackwellization.

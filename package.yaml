@@ -1,0 +1,63 @@
+name:                propagator-bbvi
+version:             0.1.0.0
+github:              "massma/propagator-bbvi"
+license:             BSD3
+author:              "Adam Massmann"
+maintainer:          "akm2203@columbia.edu"
+copyright:           "Copyright (c) 2019 Adam Massmann &lt;akm2203@columbia.edu&gt;"
+
+extra-source-files:
+- readme.org
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            science
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/massma/propagator-bbvi#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- propagators >= 0
+
+library:
+  source-dirs: src
+
+default-extensions:
+- NoImplicitPrelude
+- DeriveGeneric
+- BangPatterns
+- OverloadedStrings
+- FlexibleInstances # this one lets use use types in instances
+- LambdaCase
+- TupleSections
+- RankNTypes
+- FlexibleContexts # this lets you put specific types within a typeclass
+- RecordWildCards
+
+executables:
+  propagator-bbvi-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -O2
+    - "\"-with-rtsopts=-N -M4000m\""
+
+    dependencies:
+    - propagator-bbvi
+    - propagators
+
+tests:
+  propagator-bbvi-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - propagator-bbvi
