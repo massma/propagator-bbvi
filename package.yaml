@@ -36,6 +36,7 @@ default-extensions:
 - RankNTypes
 - FlexibleContexts # this lets you put specific types within a typeclass
 - RecordWildCards
+- TypeSynonymInstances # lets you define instances on type synonyms
 
 executables:
   propagator-bbvi-exe:
