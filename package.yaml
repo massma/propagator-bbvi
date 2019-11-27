@@ -21,6 +21,9 @@ description:         Please see the README on GitHub at <https://github.com/mass
 dependencies:
 - base >= 4.7 && < 5
 - propagators >= 0
+- statistics
+- mwc-random
+- primitive
 
 library:
   source-dirs: src
