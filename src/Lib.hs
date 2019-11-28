@@ -1,6 +1,9 @@
 module Lib
     ( someFunc
     ) where
+-- idea for tomorrow: likelihood own cell,
+-- have updateq watch t, when t advances then
+-- grab likelihood and reset it, and update q
 
 import Prelude
 import Data.Propagator
