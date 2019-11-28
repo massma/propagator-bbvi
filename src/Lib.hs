@@ -15,6 +15,8 @@ import Statistics.Distribution.Normal
 
 newtype Time = T Int deriving (Show, Eq, Ord, Read)
 
+time (T t) = t
+
 type S = (V.Vector Double)
 type LogLikelihood = Double
 
@@ -39,6 +41,8 @@ class VariationalLogic a where
 
   gradLogProb :: a -> Double -> V.Vector Double
 
+  nParams :: a -> Int
+
 instance VariationalLogic NormalDistribution where
   difference x1 x2 = sqrt (f mean + f stdDev)
     where
@@ -50,6 +54,8 @@ instance VariationalLogic NormalDistribution where
 
   fromParamVector v = normalDistr (v V.! 0) (v V.! 1)
 
+  nParams _d = 2
+
   gradLogProb d x = V.fromList [(x - mu) / std, 1 / std ^ 3 * (x - mu) ^ 2 - 1 / std]
     where
       mu = mean d
@@ -58,7 +64,7 @@ instance VariationalLogic NormalDistribution where
 -- see https://stats.stackexchange.com/questions/404191/what-is-the-log-of-the-pdf-for-a-normal-distribution
 instance Propagated (QProp s) where
   merge q1 q2
-    | f q1 q2 < 0.01 = Change False q1
+--    | f q1 q2 < 0.01 = Change False q1
     | null (loglike q2) = Change True q2
     | null (loglike q1) = Change False (q1 {loglike = loglike q2})
     | otherwise = Change False (q1 {loglike = (V.zipWith (+) (loglike q1) (loglike q2))})
@@ -66,7 +72,7 @@ instance Propagated (QProp s) where
       f x1 x2 = difference (distribution x1) (distribution x2)
 
 maxStep :: Time
-maxStep = T 20000
+maxStep = T 10
 
 instance Propagated Time where
   merge t1 t2
@@ -92,11 +98,13 @@ normalProp prior std xs t q = do
 gradient dist like samples = V.map (/ (fromIntegral $ V.length summed)) summed
   where
     summed =
-      V.foldl1' (V.zipWith (+)) $
+      V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
         (\s l -> V.map (* (l - logProb dist s)) (gradLogProb dist s))
         samples
         like
+-- >>> gradient (normalDistr 0.0 2.0) V.empty V.empty
+-- [0.0,0.0]
 
 rho alpha eta tau epsilon t grad s0 =
   ( s1
@@ -107,10 +115,12 @@ rho alpha eta tau epsilon t grad s0 =
       s1)
   where
     s1 = V.zipWith (\g s -> alpha * g ^ 2 + (1.0 - alpha) * s) grad s0
+-- >>> rho 0.1 0.01 1.0 1e-16 1 (V.fromList [0.0, 0.0]) (V.fromList [0.0, 0.0])
+-- ([0.0,0.0],[1.0e-2,1.0e-2])
 
 
-updateQ Q{..} t' =
-  Q s' newDist generator V.empty <$> V.replicateM (V.length samples) (genContinuous newDist generator)
+updateQ nSamp Q{..} t' =
+  Q s' newDist generator V.empty <$> V.replicateM nSamp (genContinuous newDist generator)
   where
     alpha = 0.1 -- from kuckelbier et al
     eta = 0.01 -- coservative, from kuckelbiet et al
@@ -119,10 +129,12 @@ updateQ Q{..} t' =
     grad = gradient distribution loglike samples
     (s', rho') = rho alpha eta tau epsilon t' grad gradMemory
     newDist = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector distribution) grad rho'
+-- >>> create >>= \gen -> updateQ 10 (Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty) 1
 
-updatePropQ t q = 0.0
+updatePropQ nSamp t q =
   watch t $ \(T t') ->
-    with q $ \qprop -> updateQ qprop t' >>= \newq -> write q newq
+    -- with q $ \qprop -> write q qprop
+    with q $ \qprop -> updateQ nSamp qprop t' >>= \newq -> write q newq
 
 -- how to efficiently watch all of our t's????
 
@@ -131,7 +143,28 @@ propagator xs = runST $ do
   gen <- create
   let prior = normalDistr 0.0 2.0
   q <- known $ Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty
-  (distribution <$>) <$> content q
+  t <- known $ T 1
+  updatePropQ 10 t q
+  normalProp prior 1.0 xs t q
+  q' <- content q
+  t' <- content t
+  return (distribution <$> q', time <$> t', samples <$> q', loglike <$> q')
+
+newtype Test = Test Int deriving (Eq, Ord, Read, Show)
+
+instance Propagated Test where
+  merge t1 t2
+    | t2 >= (Test 30) = Change False t2
+    | t1 >= (Test 5) = Change False t2
+    | otherwise = Change True t2
+
+testProp = runST $ do
+  x <- known $ Test 0
+  lift1 (\(Test x) -> Test 100) x x
+  content x
+-- >>> testProp
+-- Just (Test 0)
+
 
 someFunc :: IO ()
 someFunc = do
@@ -139,4 +172,4 @@ someFunc = do
   xs <- replicateM 1000 (genContinuous (normalDistr 5.0 3.0) gen)
   putStrLn (show $ propagator xs)
 -- >>> someFunc
--- Just (normalDistr 0.0 1.0)
+-- <interactive>:1492:2-9: error: Variable not in scope: someFunc
