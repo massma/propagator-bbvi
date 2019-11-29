@@ -5,10 +5,15 @@ module Lib
 -- have updateq watch t, when t advances then
 -- grab likelihood and reset it, and update q
 
+-- better ideas: 1. counter for n likelihood, t watches counter and
+-- updates and then resets counter by subtracting value. have counter
+-- just add whatever int it is given for merge 2. also test
+-- paraleleization by just runnin ginference on two idential gaussians
+-- (can be same sample and stuff)
 import Prelude
 import Data.Propagator
 import GHC.Generics (Generic)
-import Control.Monad (replicateM)
+import Control.Monad (replicateM, when)
 import Control.Monad.ST
 import Control.Monad.Primitive
 import qualified Data.Vector as V
@@ -16,65 +21,17 @@ import System.Random.MWC (create, GenST)
 import Statistics.Distribution
 import Statistics.Distribution.Normal
 
+class VariationalLogic a where
+  difference :: a -> a -> Double
+  logProb :: a -> Double -> Double
+  paramVector :: a -> V.Vector Double
+  fromParamVector :: V.Vector Double -> a
+  gradLogProb :: a -> Double -> V.Vector Double
+  nParams :: a -> Int
+
 newtype Time = T Int deriving (Show, Eq, Ord, Read)
 
 time (T t) = t
-
-type S = (V.Vector Double)
-type LogLikelihood = (V.Vector Double)
-
--- | Q: should we store prior with QProp? - then would have to pass xs to updateQ
-type QDistribution = NormalDistribution
-data QProp s = Q { gradMemory :: !S
-                 , distribution :: !QDistribution
-                 , generator :: !(GenST s)
-                 , samples :: !(V.Vector Double)
-                 }
-
-class VariationalLogic a where
-  difference :: a -> a -> Double
-
-  logProb :: a -> Double -> Double
-
-  paramVector :: a -> V.Vector Double
-
-  fromParamVector :: V.Vector Double -> a
-
-  gradLogProb :: a -> Double -> V.Vector Double
-
-  nParams :: a -> Int
-
-instance VariationalLogic NormalDistribution where
-  difference x1 x2 = sqrt (f mean + f stdDev)
-    where
-      f g = (g x1 - g x2) ^ 2
-
-  logProb = logDensity
-
-  paramVector d = V.fromList [mean d, stdDev d]
-
-  fromParamVector v = normalDistr (v V.! 0) (v V.! 1)
-
-  nParams _d = 2
-
-  gradLogProb d x = V.fromList [(x - mu) / std, 1 / std ^ 3 * (x - mu) ^ 2 - 1 / std]
-    where
-      mu = mean d
-      std = stdDev d
-
--- see https://stats.stackexchange.com/questions/404191/what-is-the-log-of-the-pdf-for-a-normal-distribution
-instance Propagated (QProp s) where
-  merge q1 q2
-    | f q1 q2 < 0.0001 = Change False q1
-    | otherwise = Change True q2
-    where
-      f x1 x2 = difference (distribution x1) (distribution x2)
-
-instance Propagated LogLikelihood where
-  merge l1 l2
-    | null l2 = Change True l2
-    | null l1 = Change True l2
-    | otherwise = Change True (V.zipWith (+) l1 l2)
 
 maxStep :: Time
 maxStep = T 1000000
@@ -85,6 +42,58 @@ instance Propagated Time where
   merge t1 t2
     | t1 >= maxStep = Change False t1
     | otherwise = Change True (T (time t1 + 1))
+
+newtype Counter = C (Int, Int) deriving (Show, Eq, Ord, Read)
+
+counter (C c) = c
+
+instance Propagated Counter where
+  merge (C (cnt, maxCt))  c2
+    | newCnt > maxCt = Change True (C (1, maxCt))
+    | otherwise = Change True (C (newCnt, maxCt))
+    where
+      newCnt = cnt + 1
+
+type S = (V.Vector Double)
+type LogLikelihood = (V.Vector Double)
+
+instance Propagated LogLikelihood where
+  merge l1 l2
+    | null l2 = Change True l2
+    | null l1 = Change True l2
+    | otherwise = Change True (V.zipWith (+) l1 l2)
+
+
+-- | Q: should we store prior with QProp? - then would have to pass xs to updateQ
+type QDistribution = NormalDistribution
+
+data QProp s = Q { gradMemory :: !S
+                 , distribution :: !QDistribution
+                 , generator :: !(GenST s)
+                 , samples :: !(V.Vector Double)
+                 }
+
+instance Propagated (QProp s) where
+  merge q1 q2
+    | f q1 q2 < 0.0001 = Change False q1
+    | otherwise = Change True q2
+    where
+      f x1 x2 = difference (distribution x1) (distribution x2)
+
+instance VariationalLogic NormalDistribution where
+  difference x1 x2 = sqrt (f mean + f stdDev)
+    where
+      f g = (g x1 - g x2) ^ 2
+  logProb = logDensity
+  paramVector d = V.fromList [mean d, stdDev d]
+  fromParamVector v = normalDistr (v V.! 0) (v V.! 1)
+  nParams _d = 2
+  gradLogProb d x = V.fromList [(x - mu) / std, 1 / std ^ 3 * (x - mu) ^ 2 - 1 / std]
+    where
+      mu = mean d
+      std = stdDev d
+
+
 
 gradient dist like samples = V.map (/ (fromIntegral $ V.length summed)) summed
   where
@@ -109,6 +118,8 @@ rho alpha eta tau epsilon t grad s0 =
 -- >>> rho 0.1 0.01 1.0 1e-16 1 (V.fromList [0.0, 0.0]) (V.fromList [0.0, 0.0])
 -- ([0.0,0.0],[1.0e-2,1.0e-2])
 
+watchCnt c t =
+  watch c $ \(C (c, m)) -> when (c == m) (write t (T 1))
 
 updateQ nSamp Q{..} t l =
   Q s' newDist generator <$> V.replicateM nSamp (genContinuous newDist generator)
@@ -131,7 +142,7 @@ updatePropQ nSamp t q l =
 -- | don't forget prior with variational distribution - thin kmaybe we
 -- should icnorporate prior into QProp and use it when we update q
 -- TODO: consider setting explicit minimum on stddev
-normalProp prior std xs t q l = do
+normalProp prior std xs c q l = do
   watch q $ \qprop ->
     write
       l
@@ -140,7 +151,7 @@ normalProp prior std xs t q l = do
             logDensity prior mu + -- TODO: move prior updateQ
             (sum $ fmap (logDensity (normalDistr mu std)) xs))
          (samples qprop)) >>
-    write t (T 1)
+    write c (C (1, 1))
 
 
 -- how to efficiently watch all of our t's????
@@ -154,9 +165,11 @@ propagator xs = runST $ do
   initSamp <- V.replicateM nSamp (genContinuous qDist gen)
   q <- known $ Q (V.fromList [0.0, 0.0]) qDist gen initSamp
   t <- cell
+  c <- cell
   l <- known $ V.empty
   updatePropQ nSamp t q l
-  normalProp prior 1.0 xs t q l
+  normalProp prior 1.0 xs c q l
+  watchCnt  c t
   q' <- content q
   t' <- content t
   return (distribution <$> q', time <$> t')
