@@ -154,27 +154,43 @@ normalProp prior std xs c q l = do
          (samples qprop)) >>
     write c (C (1, 1))
 
+global t1 t2 globT =
+  watch2 t1 t2 $ \_ _ -> write globT (T 1)
 
 -- how to efficiently watch all of our t's????
 
 -- propagator :: () -- Maybe VariationalProp
 propagator xs = runST $ do
   genG <- create
-  gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+  seed <- V.replicateM 256 (uniform genG)
+  gen1 <- initialize seed
+  gen2 <- initialize seed
   let prior = normalDistr 0.0 2.0
   let nSamp = 100
   let qDist = (normalDistr 0.0 2.0)
   initSamp <- V.replicateM nSamp (genContinuous qDist gen1)
-  q <- known $ Q (V.fromList [0.0, 0.0]) qDist gen1 initSamp
+  q1 <- known $ Q (V.fromList [0.0, 0.0]) qDist gen1 initSamp
+  t1 <- cell
+  c1 <- cell
+  l1 <- known $ V.empty
+  updatePropQ nSamp t1 q1 l1
+  normalProp prior 1.0 xs c1 q1 l1
+  watchCnt c1 t1
+  q2 <- known $ Q (V.fromList [0.0, 0.0]) qDist gen2 initSamp
+  t2 <- cell
+  c2 <- cell
+  l2 <- known $ V.empty
+  updatePropQ nSamp t2 q2 l2
+  normalProp prior 1.0 xs c2 q2 l2
+  watchCnt c2 t2
   t <- cell
-  c <- cell
-  l <- known $ V.empty
-  updatePropQ nSamp t q l
-  normalProp prior 1.0 xs c q l
-  watchCnt  c t
-  q' <- content q
+  global t1 t2 t
   t' <- content t
-  return (distribution <$> q', time <$> t')
+  q1' <- content q1
+  t1' <- content t1
+  q2' <- content q2
+  t2' <- content t2
+  return ((distribution <$> q1', time <$> t1'), (distribution <$> q2', time <$> t2'))
 
 someFunc :: IO ()
 someFunc = do
