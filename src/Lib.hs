@@ -17,7 +17,8 @@ import Control.Monad (replicateM, when)
 import Control.Monad.ST
 import Control.Monad.Primitive
 import qualified Data.Vector as V
-import System.Random.MWC (create, GenST)
+import Data.Word (Word32)
+import System.Random.MWC (create, GenST, uniform, initialize)
 import Statistics.Distribution
 import Statistics.Distribution.Normal
 
@@ -158,12 +159,13 @@ normalProp prior std xs c q l = do
 
 -- propagator :: () -- Maybe VariationalProp
 propagator xs = runST $ do
-  gen <- create
+  genG <- create
+  gen1 <- initialize =<< V.replicateM 256 (uniform genG)
   let prior = normalDistr 0.0 2.0
   let nSamp = 100
   let qDist = (normalDistr 0.0 2.0)
-  initSamp <- V.replicateM nSamp (genContinuous qDist gen)
-  q <- known $ Q (V.fromList [0.0, 0.0]) qDist gen initSamp
+  initSamp <- V.replicateM nSamp (genContinuous qDist gen1)
+  q <- known $ Q (V.fromList [0.0, 0.0]) qDist gen1 initSamp
   t <- cell
   c <- cell
   l <- known $ V.empty
