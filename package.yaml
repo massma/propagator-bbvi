@@ -50,7 +50,7 @@ executables:
     - -threaded
     - -rtsopts
     - -O2
-    - "\"-with-rtsopts=-N -M4000m\""
+    - "\"-with-rtsopts=-N4 -M4000m\""
 
     dependencies:
     - propagator-bbvi

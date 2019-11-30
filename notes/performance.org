@@ -68,3 +68,104 @@ user	0m2.368s
 sys	0m0.156s
 
 Compilation finished at Fri Nov 29 14:04:17
+* with global gen and intiialize from seeds
+  (Just (normalDistr 4.669105916353021 0.1600423436219402),Just 2259)
+     705,954,016 bytes allocated in the heap
+      22,946,728 bytes copied during GC
+       3,486,800 bytes maximum residency (5 sample(s))
+         252,848 bytes maximum slop
+               3 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0       665 colls,   665 par    0.128s   0.031s     0.0000s    0.0015s
+  Gen  1         5 colls,     4 par    0.008s   0.003s     0.0006s    0.0014s
+
+  Parallel GC work balance: 32.90% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    1.648s  (  1.661s elapsed)
+  GC      time    0.136s  (  0.034s elapsed)
+  EXIT    time    0.000s  (  0.005s elapsed)
+  Total   time    1.784s  (  1.701s elapsed)
+
+  Alloc rate    428,370,155 bytes per MUT second
+
+  Productivity  92.4% of total user, 97.6% of total elapsed
+
+
+real	0m1.800s
+user	0m1.884s
+sys	0m0.108s
+
+Compilation finished at Fri Nov 29 14:22:10
+* using all cores, 2x (independent) work load
+((Just (normalDistr 4.669105916353021 0.1600423436219402),Just 2259),(Just (normalDistr 4.649864615874977 0.15885676362789877),Just 2260))
+   1,449,903,552 bytes allocated in the heap
+      48,299,496 bytes copied during GC
+       3,548,576 bytes maximum residency (9 sample(s))
+         263,688 bytes maximum slop
+               3 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0      1368 colls,  1368 par    0.308s   0.068s     0.0000s    0.0040s
+  Gen  1         9 colls,     8 par    0.028s   0.006s     0.0007s    0.0013s
+
+  Parallel GC work balance: 33.83% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    3.356s  (  3.469s elapsed)
+  GC      time    0.336s  (  0.073s elapsed)
+  EXIT    time    0.000s  (  0.008s elapsed)
+  Total   time    3.692s  (  3.551s elapsed)
+
+  Alloc rate    432,033,239 bytes per MUT second
+
+  Productivity  90.9% of total user, 97.7% of total elapsed
+
+
+real	0m3.649s
+user	0m3.796s
+sys	0m0.196s
+
+Compilation finished at Fri Nov 29 14:46:18
+* upped precision
+
+(Just (normalDistr 5.061441713223422 6.625001534702141e-2),Just 40800)
+  12,733,261,232 bytes allocated in the heap
+     464,629,752 bytes copied during GC
+      78,047,384 bytes maximum residency (10 sample(s))
+       4,499,304 bytes maximum slop
+              74 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     12047 colls, 12047 par    3.048s   1.105s     0.0001s    0.0174s
+  Gen  1        10 colls,     9 par    0.196s   0.078s     0.0078s    0.0316s
+
+  Parallel GC work balance: 40.60% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time   33.324s  ( 32.880s elapsed)
+  GC      time    3.244s  (  1.183s elapsed)
+  EXIT    time    0.000s  (  0.007s elapsed)
+  Total   time   36.568s  ( 34.070s elapsed)
+
+  Alloc rate    382,104,826 bytes per MUT second
+
+  Productivity  91.1% of total user, 96.5% of total elapsed
+
+
+real	0m34.174s
+user	0m36.692s
+sys	0m2.764s

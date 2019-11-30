@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Lib
     ( someFunc
     ) where
@@ -16,6 +17,7 @@ import GHC.Generics (Generic)
 import Control.Monad (replicateM, when)
 import Control.Monad.ST
 import Control.Monad.Primitive
+import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
 import Data.Word (Word32)
 import System.Random.MWC (create, GenST, uniform, initialize)
@@ -30,19 +32,17 @@ class VariationalLogic a where
   gradLogProb :: a -> Double -> V.Vector Double
   nParams :: a -> Int
 
-newtype Time = T Int deriving (Show, Eq, Ord, Read)
-
-time (T t) = t
+newtype Time = T Int deriving (Show, Eq, Ord, Read, Num)
 
 maxStep :: Time
-maxStep = T 1000000
+maxStep = T 100000
 
 -- | time can only increase in increments of 1. syntax is to write t
 -- to 1, b/c that way an empty t starts at 1
 instance Propagated Time where
   merge t1 t2
     | t1 >= maxStep = Change False t1
-    | otherwise = Change True (T (time t1 + 1))
+    | otherwise = Change True (t1 + (T 1))
 
 newtype Counter = C (Int, Int) deriving (Show, Eq, Ord, Read)
 
@@ -71,13 +71,16 @@ type QDistribution = NormalDistribution
 data QProp s = Q { gradMemory :: !S
                  , distribution :: !QDistribution
                  , generator :: !(GenST s)
+                 , time :: !Time
                  , samples :: !(V.Vector Double)
                  }
 
 instance Propagated (QProp s) where
   merge q1 q2
-    | f q1 q2 < 0.0001 = Change False q1
-    | otherwise = Change True q2
+    -- | f q1 q2 < 0.00001 = Change False q1
+    | time q2 > maxStep = Change False q1
+    | time q2 > time q1 = Change True q2
+    | otherwise = Contradiction mempty ""
     where
       f x1 x2 = difference (distribution x1) (distribution x2)
 
@@ -94,8 +97,6 @@ instance VariationalLogic NormalDistribution where
       mu = mean d
       std = stdDev d
 
-
-
 gradient dist like samples = V.map (/ (fromIntegral $ V.length summed)) summed
   where
     summed =
@@ -107,7 +108,7 @@ gradient dist like samples = V.map (/ (fromIntegral $ V.length summed)) summed
 -- >>> gradient (normalDistr 0.0 2.0) V.empty V.empty
 -- [0.0,0.0]
 
-rho alpha eta tau epsilon t grad s0 =
+rho alpha eta tau epsilon (T t) grad s0 =
   ( s1
   , V.map
       (\s ->
@@ -122,40 +123,43 @@ rho alpha eta tau epsilon t grad s0 =
 watchCnt c t =
   watch c $ \(C (c, m)) -> when (c == m) (write t (T 1))
 
-updateQ nSamp Q{..} t l =
-  Q s' newDist generator <$> V.replicateM nSamp (genContinuous newDist generator)
+updateQ nSamp Q{..} l =
+  Q s' newDist generator (time + (T 1)) <$> V.replicateM nSamp (genContinuous newDist generator)
   where
     alpha = 0.1 -- from kuckelbier et al
     eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     tau = 1.0
     epsilon = 1e-16
     grad = gradient distribution l samples
-    (s', rho') = rho alpha eta tau epsilon t grad gradMemory
+    (s', rho') = rho alpha eta tau epsilon time grad gradMemory
     newDist = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector distribution) grad rho'
 -- >>> create >>= \gen -> updateQ 10 (Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty) 1
 
-updatePropQ nSamp t q l =
-  watch t $ \(T t') ->
-    with q $ \q' ->
-      with l $ \l' ->
-        updateQ nSamp q' t' l' >>= \newq -> write l V.empty >> write q newq
+-- | still not sure this is proper
+updatePropQ nSamp q l =
+  with q $ \q' -> do
+    l' <- fromMaybe (error "no content in likelohood") <$> content l
+    newQ <- updateQ nSamp q' l'
+    write l V.empty
+    write q newQ
 
--- | don't forget prior with variational distribution - thin kmaybe we
+
+-- | don't forget prior with variational distribution - thin maybe we
 -- should icnorporate prior into QProp and use it when we update q
 -- TODO: consider setting explicit minimum on stddev
-normalProp prior std xs c q l = do
+normalProp nSamp prior std xs q l = do
   watch q $ \qprop ->
-    write
-      l
-      (fmap
-         (\mu ->
-            logDensity prior mu + -- TODO: move prior updateQ
-            (sum $ fmap (logDensity (normalDistr mu std)) xs))
-         (samples qprop)) >>
-    write c (C (1, 1))
-
-global t1 t2 globT =
-  watch2 t1 t2 $ \_ _ -> write globT (T 1)
+    mapM_
+      (\x -> write l (V.map (\mu -> logDensity (normalDistr mu std) x) (samples qprop)))
+      xs >>
+    updatePropQ nSamp q l
+    -- write
+    --   l
+    --   (fmap
+    --      (\mu ->
+    --         logDensity prior mu + -- TODO: move prior updateQ
+    --         (sum $ fmap (logDensity (normalDistr mu std)) xs))
+    --      (samples qprop))
 
 -- how to efficiently watch all of our t's????
 
@@ -164,38 +168,22 @@ propagator xs = runST $ do
   genG <- create
   seed <- V.replicateM 256 (uniform genG)
   gen1 <- initialize seed
-  gen2 <- initialize seed
   let prior = normalDistr 0.0 2.0
   let nSamp = 100
   let qDist = (normalDistr 0.0 2.0)
   initSamp <- V.replicateM nSamp (genContinuous qDist gen1)
-  q1 <- known $ Q (V.fromList [0.0, 0.0]) qDist gen1 initSamp
-  t1 <- cell
-  c1 <- cell
+  q1 <- known $ Q (V.fromList [0.0, 0.0]) qDist gen1 (T 1) initSamp
   l1 <- known $ V.empty
-  updatePropQ nSamp t1 q1 l1
-  normalProp prior 1.0 xs c1 q1 l1
-  watchCnt c1 t1
-  q2 <- known $ Q (V.fromList [0.0, 0.0]) qDist gen2 initSamp
-  t2 <- cell
-  c2 <- cell
-  l2 <- known $ V.empty
-  updatePropQ nSamp t2 q2 l2
-  normalProp prior 1.0 xs c2 q2 l2
-  watchCnt c2 t2
-  t <- cell
-  global t1 t2 t
-  t' <- content t
+  t1 <- known $ (T 1)
+  normalProp nSamp prior 1.0 xs q1 l1
   q1' <- content q1
-  t1' <- content t1
-  q2' <- content q2
-  t2' <- content t2
-  return ((distribution <$> q1', time <$> t1'), (distribution <$> q2', time <$> t2'))
+  return (distribution <$> q1', time <$> q1')
 
 someFunc :: IO ()
 someFunc = do
   gen <- create
   xs <- replicateM 1000 (genContinuous (normalDistr 5.0 3.0) gen)
   putStrLn (show $ propagator xs)
+-- (Just (normalDistr 4.669105916353021 0.1600423436219402),Just 2259)
 -- >>> someFunc
---
+-- (Just (normalDistr 4.669105916353021 0.1600423436219402),Just 2259)
