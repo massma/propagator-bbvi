@@ -10,6 +10,7 @@ import Control.Monad.ST
 import Control.Monad.Primitive
 import qualified Data.Vector as V
 import Data.Word (Word32)
+import Numeric.AD (grad', grad, diff, Mode, auto)
 import System.Random.MWC (create, GenST, uniform, initialize)
 import Statistics.Distribution
 import Statistics.Distribution.Normal
@@ -61,6 +62,7 @@ type QDistribution = NormalDistribution
 data QProp s = Q { gradMemory :: !S
                  , distribution :: !QDistribution
                  , generator :: !(GenST s)
+                 , stdSamples :: !(V.Vector Double)
                  , samples :: !(V.Vector Double)
                  }
 
@@ -96,6 +98,16 @@ gradient dist like samples = V.map (/ (fromIntegral $ V.length summed)) summed
         (\s l -> V.map (* (l - logProb dist s)) (gradNuLogQ dist s))
         samples
         like
+
+gradientAD dist like transformedSamples samples = V.map (/ (fromIntegral $ V.length summed)) summed
+  where
+    summed =
+      V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
+      V.zipWith3
+        (\tS s l -> V.map (* (l - gradZQ dist tS)) (gradNuTransform dist s))
+        transformedSamples
+        samples
+        like
 -- >>> gradient (normalDistr 0.0 2.0) V.empty V.empty
 -- [0.0,0.0]
 
@@ -111,27 +123,46 @@ rho alpha eta tau epsilon t grad s0 =
 -- >>> rho 0.1 0.01 1.0 1e-16 1 (V.fromList [0.0, 0.0]) (V.fromList [0.0, 0.0])
 -- ([0.0,0.0],[1.0e-2,1.0e-2])
 
-updateQ nSamp Q{..} (T t) l =
+updateQ gradF nSamp Q{..} (T t) l =
   Q s' newDist generator <$> V.replicateM nSamp (genContinuous newDist generator)
   where
     alpha = 0.1 -- from kuckelbier et al
     eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     tau = 1.0
     epsilon = 1e-16
-    grad = gradient distribution l samples
+    grad = gradF distribution l samples
     (s', rho') = rho alpha eta tau epsilon t grad gradMemory
     newDist = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector distribution) grad rho'
 -- >>> create >>= \gen -> updateQ 10 (Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty) 1
 
-updatePropQ nSamp t q l =
+updatePropQ nSamp t q lAD l =
   watch l $ \(tl, _cnt, _maxCnt, l') ->
     with t $ \tGlobal -> when (tl == tGlobal) $
       with q $ \q' ->
-          updateQ nSamp q' tGlobal l' >>= \newq -> write t (T 1) >> write q newq
+          updateQ gradient nSamp q' tGlobal l' >>= \newq -> write t (T 1) >> write q newq
+
+updatePropQAD nSamp t q lAD l =
+  watch l $ \(tl, _cnt, _maxCnt, l') ->
+    with t $ \tGlobal -> when (tl == tGlobal) $
+      with q $ \q' ->
+          updateQ gradientAD nSamp q' tGlobal l' >>= \newq -> write t (T 1) >> write q newq
 
 -- | don't forget prior with variational distribution - thin kmaybe we
 -- should icnorporate prior into QProp and use it when we update q
 -- TODO: consider setting explicit minimum on stddev
+
+normalPropAD prior std xs q l = do
+  watch q $ \qprop ->
+    write
+      l
+      ( (T 1)
+      , (1 :: Int)
+      , (1 :: Int)
+      , (fmap
+           (\mu ->
+              gradZQ prior mu + -- TODO: move prior updateQ
+              (sum $ fmap (gradZQ (normalDistr mu std)) xs))
+           (samples qprop)))
 
 normalProp prior std xs q l = do
   watch q $ \qprop ->
