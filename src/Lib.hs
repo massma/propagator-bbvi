@@ -1,15 +1,6 @@
 module Lib
     ( someFunc
     ) where
--- idea for tomorrow: likelihood own cell,
--- have updateq watch t, when t advances then
--- grab likelihood and reset it, and update q
-
--- better ideas: 1. counter for n likelihood, t watches counter and
--- updates and then resets counter by subtracting value. have counter
--- just add whatever int it is given for merge 2. also test
--- paraleleization by just runnin ginference on two idential gaussians
--- (can be same sample and stuff)
 import Prelude
 import Data.Propagator
 import GHC.Generics (Generic)
