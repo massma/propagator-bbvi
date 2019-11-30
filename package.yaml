@@ -25,6 +25,7 @@ dependencies:
 - mwc-random
 - primitive
 - vector
+- ad
 
 library:
   source-dirs: src

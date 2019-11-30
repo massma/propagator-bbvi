@@ -1,7 +1,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Lib
-    ( someFunc
-    ) where
+  ( someFunc
+  ) where
 import Prelude
 import Data.Propagator
 import GHC.Generics (Generic)
@@ -19,8 +19,12 @@ class VariationalLogic a where
   logProb :: a -> Double -> Double
   paramVector :: a -> V.Vector Double
   fromParamVector :: V.Vector Double -> a
-  gradLogProb :: a -> Double -> V.Vector Double
+  gradNuLogQ :: a -> Double -> V.Vector Double -- nu are parameters to variational family
   nParams :: a -> Int
+
+class VariationalLogic a => Differentiable a where
+  gradNuTransform :: a -> Double -> V.Vector Double
+  gradZQ :: a -> Double -> Double
 
 newtype Time = T Int deriving (Show, Eq, Ord, Read, Num)
 
@@ -38,7 +42,8 @@ instance Propagated Time where
 
 type S = (V.Vector Double)
 
-type LogLikelihood = (Time, Int, Int, (V.Vector Double))
+type Count = Int
+type LogLikelihood = (Time, Count, Count, (V.Vector Double))
 
 instance Propagated LogLikelihood where
   merge (t, cnt, maxCt, v1) (_, _, _, v2)
@@ -74,17 +79,21 @@ instance VariationalLogic NormalDistribution where
   paramVector d = V.fromList [mean d, stdDev d]
   fromParamVector v = normalDistr (v V.! 0) (v V.! 1)
   nParams _d = 2
-  gradLogProb d x = V.fromList [(x - mu) / std, 1 / std ^ 3 * (x - mu) ^ 2 - 1 / std]
+  gradNuLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ 3 * (x - mu) ^ 2 - 1 / std]
     where
       mu = mean d
       std = stdDev d
+
+instance Differentiable NormalDistribution where
+  gradZQ d z = -(z - mean d)/(2 * stdDev d ** 2)
+  gradNuTransform d epsilon = V.fromList [1.0 , epsilon]
 
 gradient dist like samples = V.map (/ (fromIntegral $ V.length summed)) summed
   where
     summed =
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
-        (\s l -> V.map (* (l - logProb dist s)) (gradLogProb dist s))
+        (\s l -> V.map (* (l - logProb dist s)) (gradNuLogQ dist s))
         samples
         like
 -- >>> gradient (normalDistr 0.0 2.0) V.empty V.empty
@@ -116,9 +125,9 @@ updateQ nSamp Q{..} (T t) l =
 
 updatePropQ nSamp t q l =
   watch l $ \(tl, _cnt, _maxCnt, l') ->
-    with t $ \tGlob -> when (tl == tGlob) $
+    with t $ \tGlobal -> when (tl == tGlobal) $
       with q $ \q' ->
-          updateQ nSamp q' tGlob l' >>= \newq -> write t (T 1) >> write q newq
+          updateQ nSamp q' tGlobal l' >>= \newq -> write t (T 1) >> write q newq
 
 -- | don't forget prior with variational distribution - thin kmaybe we
 -- should icnorporate prior into QProp and use it when we update q
