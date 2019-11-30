@@ -1,3 +1,4 @@
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Lib
     ( someFunc
     ) where
@@ -21,12 +22,12 @@ class VariationalLogic a where
   gradLogProb :: a -> Double -> V.Vector Double
   nParams :: a -> Int
 
-newtype Time = T Int deriving (Show, Eq, Ord, Read)
+newtype Time = T Int deriving (Show, Eq, Ord, Read, Num)
 
 time (T t) = t
 
 maxStep :: Time
-maxStep = T 1000000
+maxStep = T 100000
 
 -- | time can only increase in increments of 1. syntax is to write t
 -- to 1, b/c that way an empty t starts at 1
@@ -35,26 +36,19 @@ instance Propagated Time where
     | t1 >= maxStep = Change False t1
     | otherwise = Change True (T (time t1 + 1))
 
-newtype Counter = C (Int, Int) deriving (Show, Eq, Ord, Read)
-
-counter (C c) = c
-
-instance Propagated Counter where
-  merge (C (cnt, maxCt))  c2
-    | newCnt > maxCt = Change True (C (1, maxCt))
-    | otherwise = Change True (C (newCnt, maxCt))
-    where
-      newCnt = cnt + 1
-
 type S = (V.Vector Double)
-type LogLikelihood = (V.Vector Double)
+
+type LogLikelihood = (Time, Int, Int, (V.Vector Double))
 
 instance Propagated LogLikelihood where
-  merge l1 l2
-    | null l2 = Change True l2
-    | null l1 = Change True l2
-    | otherwise = Change True (V.zipWith (+) l1 l2)
-
+  merge (t, cnt, maxCt, v1) (_, _, _, v2)
+    | (cnt == 0) && (newCnt == maxCt)  = Change True ((t+1), 0, maxCt, v2)
+    | (cnt == 0) = Change True ((t+1), newCnt, maxCt, v2)
+    | cnt == maxCt = Change True (t+(T 1), 0, maxCt, (V.zipWith (+) v1 v2))
+    | t >= maxStep = Change False (t, cnt, maxCt, v1)
+    | otherwise = Change True (t, newCnt, maxCt, (V.zipWith (+) v1 v2))
+    where
+      newCnt = cnt + 1
 
 -- | Q: should we store prior with QProp? - then would have to pass xs to updateQ
 type QDistribution = NormalDistribution
@@ -108,10 +102,7 @@ rho alpha eta tau epsilon t grad s0 =
 -- >>> rho 0.1 0.01 1.0 1e-16 1 (V.fromList [0.0, 0.0]) (V.fromList [0.0, 0.0])
 -- ([0.0,0.0],[1.0e-2,1.0e-2])
 
-watchCnt c t =
-  watch c $ \(C (c, m)) -> when (c == m) (write t (T 1))
-
-updateQ nSamp Q{..} t l =
+updateQ nSamp Q{..} (T t) l =
   Q s' newDist generator <$> V.replicateM nSamp (genContinuous newDist generator)
   where
     alpha = 0.1 -- from kuckelbier et al
@@ -124,29 +115,27 @@ updateQ nSamp Q{..} t l =
 -- >>> create >>= \gen -> updateQ 10 (Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty) 1
 
 updatePropQ nSamp t q l =
-  watch t $ \(T t') ->
-    with q $ \q' ->
-      with l $ \l' ->
-        updateQ nSamp q' t' l' >>= \newq -> write l V.empty >> write q newq
+  watch l $ \(tl, _cnt, _maxCnt, l') ->
+    with t $ \tGlob -> when (tl == tGlob) $
+      with q $ \q' ->
+          updateQ nSamp q' tGlob l' >>= \newq -> write t (T 1) >> write q newq
 
 -- | don't forget prior with variational distribution - thin kmaybe we
 -- should icnorporate prior into QProp and use it when we update q
 -- TODO: consider setting explicit minimum on stddev
-normalProp prior std xs c q l = do
+
+normalProp prior std xs q l = do
   watch q $ \qprop ->
     write
       l
-      (fmap
-         (\mu ->
-            logDensity prior mu + -- TODO: move prior updateQ
-            (sum $ fmap (logDensity (normalDistr mu std)) xs))
-         (samples qprop)) >>
-    write c (C (1, 1))
-
-global t1 t2 globT =
-  watch2 t1 t2 $ \_ _ -> write globT (T 1)
-
--- how to efficiently watch all of our t's????
+      ( (T 1)
+      , (1 :: Int)
+      , (1 :: Int)
+      , (fmap
+           (\mu ->
+              logDensity prior mu + -- TODO: move prior updateQ
+              (sum $ fmap (logDensity (normalDistr mu std)) xs))
+           (samples qprop)))
 
 -- propagator :: () -- Maybe VariationalProp
 propagator xs = runST $ do
@@ -159,12 +148,10 @@ propagator xs = runST $ do
   let qDist = (normalDistr 0.0 2.0)
   initSamp <- V.replicateM nSamp (genContinuous qDist gen1)
   q1 <- known $ Q (V.fromList [0.0, 0.0]) qDist gen1 initSamp
-  t1 <- cell
-  c1 <- cell
-  l1 <- known $ V.empty
+  t1 <- known $ T 1
+  l1 <- cell
+  normalProp prior 1.0 xs q1 l1
   updatePropQ nSamp t1 q1 l1
-  normalProp prior 1.0 xs c1 q1 l1
-  watchCnt c1 t1
   q1' <- content q1
   t1' <- content t1
   return (distribution <$> q1', time <$> t1')
