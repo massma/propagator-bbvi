@@ -108,7 +108,7 @@ rho alpha eta tau epsilon grad QDist{..} =
   where
     memNew = V.zipWith (\g s -> alpha * g ^ (2 :: Int) + (1.0 - alpha) * s) grad memory
 
-qGeneric likeFunc gradF gen nSamp xs q@(QDist{..}) = do
+qGeneric gradF likeFunc gen nSamp xs q@(QDist{..}) = do
   s <- V.replicateM nSamp (resample newQ gen)
   return $ q {time = time + 1, memory = memory', dist = newQ, samples = s} -- QDist (time + 1) memory' weight newQ prior s rhoF
   where
@@ -118,15 +118,44 @@ qGeneric likeFunc gradF gen nSamp xs q@(QDist{..}) = do
     newQ = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector dist) grad rho'
 -- >>> create >>= \gen -> updateQ 10 (Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty) 1
 
-qPropGeneric likeFunc gradF gen nSamp xs q =
+qPropGeneric ::
+  VariationalLogic a =>
+     (QDist a -> V.Vector Double -> V.Vector Double)
+  -> (Double -> Double -> Double)
+  -> GenST s
+  -> Int
+  -> V.Vector Double
+  -> Cell s (QDist a)
+  -> ST s ()
+qPropGeneric gradF likeFunc gen nSamp xs q =
   watch q $ \q' -> do
-    write q =<< qGeneric likeFunc gradF gen nSamp xs q'
+    write q =<< qGeneric gradF likeFunc gen nSamp xs q'
+
+qProp ::
+  VariationalLogic a =>
+  (Double -> Double -> Double)
+  -> GenST s
+  -> Int
+  -> V.Vector Double
+  -> Cell s (QDist a)
+  -> ST s ()
+qProp = qPropGeneric gradient
+
+qPropAD ::
+  Differentiable a =>
+  (Double -> Double -> Double)
+  -> GenST s
+  -> Int
+  -> V.Vector Double
+  -> Cell s (QDist a)
+  -> ST s ()
+qPropAD = qPropGeneric gradientAD
 
 qNormalProp :: VariationalLogic a => Double -> GenST s -> Int -> V.Vector Double -> Cell s (QDist a) -> ST s ()
-qNormalProp std = qPropGeneric (normalLike std) gradient
+qNormalProp std = qProp (normalLike std)
 
 qNormalPropAD :: Differentiable a => Double -> GenST s -> Int -> V.Vector Double -> Cell s (QDist a) -> ST s ()
-qNormalPropAD std = qPropGeneric (normalLikeAD std) gradientAD
+qNormalPropAD std = qPropAD (normalLikeAD std)
 
 normalLike std z x = logDensity (normalDistr z std) x
 
