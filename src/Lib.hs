@@ -195,33 +195,35 @@ updateQProp gen nSamp prior l stdNorm s q memory =
 -- should icnorporate prior into QProp and use it when we update q
 -- TODO: consider setting explicit minimum on stddev
 
-normalPropAD std xs s l = do
-  watch s $ \s' ->
-    write
-      l
-      (LL
-         (T 1)
-         (1 :: Int)
-         (1 :: Int)
-         (Just
-            ( 1.0
-            , (fmap (\mu -> (sum $ fmap ((V.! 0) . gradNuLogQ (normalDistr mu std)) xs)) s')))
-         Nothing)
+normalPropAD std xs s l t = do
+  watch t $ \_t ->
+    with s $ \s' ->
+      write
+        l
+        (LL
+           (T 1)
+           (1 :: Int)
+           (1 :: Int)
+           (Just
+              ( 1.0
+              , (fmap (\mu -> (sum $ fmap ((V.! 0) . gradNuLogQ (normalDistr mu std)) xs)) s')))
+           Nothing)
 
-normalProp std xs s l = do
-  watch s $ \s' ->
-    write
-      l
-      (LL
-         (T 1)
-         (1 :: Int)
-         (1 :: Int)
-         Nothing
-         (Just
-            ( 1.0
-            , (fmap
-                 (\mu -> (sum $ fmap (logDensity (normalDistr mu std)) xs))
-                 s'))))
+normalProp std xs s l t = do
+  watch t $ \_t ->
+    with s $ \s' ->
+      write
+        l
+        (LL
+           (T 1)
+           (1 :: Int)
+           (1 :: Int)
+           Nothing
+           (Just
+              ( 1.0
+              , (fmap
+                   (\mu -> (sum $ fmap (logDensity (normalDistr mu std)) xs))
+                   s'))))
 
 -- propagator :: () -- Maybe VariationalProp
 propagator xs = runST $ do
@@ -240,8 +242,8 @@ propagator xs = runST $ do
   samp <- cell
   mem <- known $ M (V.replicate(nParams  qDist) 0.0)
   resample q stdNorm samp
-  normalProp 1.0 xs samp l
-  -- normalPropAD 1.0 xs samp l
+  normalProp 1.0 xs samp l stdNorm
+  -- normalPropAD 1.0 xs samp l stdNorm
   updateQProp gen1 nSamp prior l stdNorm samp q mem
   q' <- content q
   t' <- content stdNorm
