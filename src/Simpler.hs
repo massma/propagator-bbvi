@@ -10,6 +10,8 @@ import qualified Data.Vector as V
 import System.Random.MWC (create, uniform, initialize)
 import Statistics.Distribution
 import Statistics.Distribution.Normal
+import qualified System.Random.MWC.Distributions as MWCD
+import qualified Statistics.Sample as Samp
 
 class VariationalLogic a where
   difference :: a -> a -> Double
@@ -18,6 +20,11 @@ class VariationalLogic a where
   fromParamVector :: V.Vector Double -> a
   gradNuLogQ :: a -> Double -> V.Vector Double -- nu are parameters to variational family
   nParams :: a -> Int
+
+class VariationalLogic a => Differentiable a where
+  gradNuTransform :: a -> Double -> V.Vector Double
+  gradZQ :: a -> Double -> Double
+  transform :: a -> Double -> Double
 
 type Time = Int
 
@@ -37,7 +44,8 @@ data QDist = QDist { time :: Time
                    , weight :: Weight
                    , dist :: NormalDistribution
                    , prior :: NormalDistribution
-                   , samples :: Sample}
+                   , samples :: Sample
+                   , standardNormal :: Sample}
 
 instance Propagated QDist where
   merge q1 q2
@@ -58,6 +66,11 @@ instance VariationalLogic NormalDistribution where
       mu = mean d
       std = stdDev d
 
+instance Differentiable NormalDistribution where
+  gradZQ d z = -(z - mean d)/(stdDev d ** 2)
+  gradNuTransform d epsilon = V.fromList [1.0 , epsilon]
+  transform d epsilon = mean d + stdDev d * epsilon
+
 gradient :: QDist -> V.Vector Double -> V.Vector Double
 gradient QDist{..} like = V.map (/ (fromIntegral $ V.length summed)) summed
   where
@@ -66,6 +79,17 @@ gradient QDist{..} like = V.map (/ (fromIntegral $ V.length summed)) summed
       V.zipWith
         (\s l -> V.map (* (l + weight * (logDensity prior s - logProb dist s))) (gradNuLogQ dist s))
         samples
+        like
+
+gradientAD QDist{..} like = V.map (/ (fromIntegral $ V.length summed)) summed
+  where
+    summed =
+      -- TODO: add prior!!
+      V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
+      V.zipWith3
+        (\tS sn l -> V.map (* (l + weight * (gradZQ prior tS - gradZQ dist tS))) (gradNuTransform dist sn))
+        samples
+        standardNormal
         like
 
 rho alpha eta tau epsilon t grad s0 =
@@ -78,28 +102,39 @@ rho alpha eta tau epsilon t grad s0 =
   where
     s1 = V.zipWith (\g s -> alpha * g ^ (2 :: Int) + (1.0 - alpha) * s) grad s0
 
-updateQNormal gen nSamp std xs q@(QDist{..}) =
-  QDist (time + 1) memory' weight newQ prior <$> V.replicateM nSamp (genContinuous newQ gen)
+qNormalGeneric likeFunc gradF gen nSamp std xs q@(QDist{..}) = do
+  s <- V.replicateM nSamp (MWCD.standard gen)
+  return $ QDist (time + 1) memory' weight newQ prior (fmap (transform newQ) s) s
   where
-    like = normalLike std xs samples
+    like = likeFunc std xs samples
     alpha = 0.1 -- from kuckelbier et al
     eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     tau = 1.0
     epsilon = 1e-16
-    grad = gradient q like
+    grad = gradF q like
     (memory', rho') = rho alpha eta tau epsilon time grad memory
     newQ = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector dist) grad rho'
 -- >>> create >>= \gen -> updateQ 10 (Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty) 1
 
 -- will content trick work, or should we do watch???? seems liek
 -- content could repeat a bunch of identical computations
-updateQNormalProp gen nSamp std xs q =
+qNormalPropGeneric likeFunc gradF gen nSamp std xs q =
   watch q $ \q' -> do
     -- q' <- fromMaybe (error "impos") <$> content q
-    write q =<<  updateQNormal gen nSamp std xs q'
+    write q =<< qNormalGeneric likeFunc gradF gen nSamp std xs q'
+
+updateQNormalProp = qNormalPropGeneric normalLike gradient
+
+updateQNormalPropAD = qNormalPropGeneric normalLikeAD gradientAD
 
 normalLike std xs samples =
   fmap (\mu -> (sum $ fmap (logDensity (normalDistr mu std)) xs)) samples
+
+-- | specialize all fmaps to vector???
+normalLikeAD std xs samples =
+  fmap
+    (\mu -> (sum $ V.map ((V.! 0) . gradNuLogQ (normalDistr mu std)) xs))
+    samples
 
 -- propagator :: () -- Maybe VariationalProp
 propagator xs = runST $ do
@@ -109,11 +144,13 @@ propagator xs = runST $ do
   let prior = normalDistr 0.0 2.0
   let nSamp = 100
   let qDist = normalDistr 0.0 2.0
-  initSamp <- V.replicateM nSamp (genContinuous qDist gen1)
-  q <- known $ QDist 1 (V.replicate 2 0) 1 qDist prior initSamp
+  stdNormal <- V.replicateM nSamp (MWCD.standard gen1)
+  let initSamp = V.map (transform qDist) stdNormal
+  q <- known $ QDist 1 (V.replicate 2 0) 1 qDist prior initSamp stdNormal
   updateQNormalProp gen1 nSamp 1.0 xs q
+  updateQNormalPropAD gen1 nSamp 1.0 xs q
   q' <- fromMaybe (error "impos") <$> content q
-  return (dist q', time q')
+  return (dist q', time q', Samp.mean xs)
 
 someFunc :: IO ()
 someFunc = do

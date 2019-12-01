@@ -342,3 +342,38 @@ user	0m41.756s
 sys	0m1.460s
 
 Compilation finished at Sun Dec  1 01:43:34
+* maybe naive greedy algo appears to work (no exponetial blow up of thunks)
+
+(normalDistr 5.071612705591072 5.349675807683909e-2,100000,5.064943538470939)
+2,192,294,233,192 bytes allocated in the heap
+  15,339,162,768 bytes copied during GC
+     477,936,768 bytes maximum residency (60 sample(s))
+      32,510,848 bytes maximum slop
+             455 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     2104520 colls, 2104520 par   282.792s  88.102s     0.0000s    0.0448s
+  Gen  1        60 colls,    59 par    7.648s   2.824s     0.0471s    0.9389s
+
+  Parallel GC work balance: 29.71% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time  818.824s  (801.149s elapsed)
+  GC      time  290.440s  ( 90.926s elapsed)
+  EXIT    time    0.000s  (  0.004s elapsed)
+  Total   time  1109.264s  (892.080s elapsed)
+
+  Alloc rate    2,677,369,292 bytes per MUT second
+
+  Productivity  73.8% of total user, 89.8% of total elapsed
+
+
+real	14m52.187s
+user	18m29.384s
+sys	3m19.036s
+
+Compilation finished at Sun Dec  1 10:10:54
