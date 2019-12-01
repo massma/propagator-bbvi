@@ -69,3 +69,5 @@ extra-deps:
 #
 # Allow a newer minor version of GHC than the snapshot specifies
 # compiler-check: newer-minor
+ghc-options:
+    "$everything": -Wall -O2 -Wcompat -Wincomplete-record-updates -Wincomplete-uni-patterns -Wredundant-constraints # -fexcess-precision -optc-ffast-math -optc-O3

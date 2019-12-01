@@ -4,19 +4,12 @@ module Simpler
   ) where
 import Prelude
 import Data.Propagator
-import GHC.Generics (Generic)
-import Control.Monad (replicateM, when)
 import Control.Monad.ST
-import Control.Monad.Primitive
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
-import Data.Word (Word32)
-import Numeric.AD (grad', grad, diff, Mode, auto)
-import System.Random.MWC (create, GenST, uniform, initialize)
-import qualified System.Random.MWC.Distributions as MWCD
+import System.Random.MWC (create, uniform, initialize)
 import Statistics.Distribution
 import Statistics.Distribution.Normal
-import qualified Statistics.Sample as Samp
 
 class VariationalLogic a where
   difference :: a -> a -> Double
@@ -30,13 +23,10 @@ type Time = Int
 
 maxStep :: Time
 maxStep = 100000
-
 -- | time can only increase in increments of 1. syntax is to write t
 -- to 1, b/c that way an empty t starts at 1
 
 type Memory = V.Vector Double
-
-norm = sqrt . V.sum . V.map (^2)
 
 type Sample = V.Vector Double
 
@@ -52,21 +42,23 @@ data QDist = QDist { time :: Time
 instance Propagated QDist where
   merge q1 q2
     | difference (dist q1) (dist q2) < 0.00001 = Change False q1 -- 0.00001
+    | time q1 >= maxStep = Change False q1
     | otherwise = Change True q2
 
 instance VariationalLogic NormalDistribution where
   difference x1 x2 = sqrt (f mean + f stdDev)
     where
-      f g = (g x1 - g x2) ^ 2
+      f g = (g x1 - g x2) ^ (2 :: Int)
   logProb = logDensity
   paramVector d = V.fromList [mean d, stdDev d]
   fromParamVector v = normalDistr (v V.! 0) (v V.! 1)
   nParams _d = 2
-  gradNuLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ 3 * (x - mu) ^ 2 - 1 / std]
+  gradNuLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
     where
       mu = mean d
       std = stdDev d
 
+gradient :: QDist -> V.Vector Double -> V.Vector Double
 gradient QDist{..} like = V.map (/ (fromIntegral $ V.length summed)) summed
   where
     summed =
@@ -84,7 +76,7 @@ rho alpha eta tau epsilon t grad s0 =
          (1.0 / (tau + sqrt s)))
       s1)
   where
-    s1 = V.zipWith (\g s -> alpha * g ^ 2 + (1.0 - alpha) * s) grad s0
+    s1 = V.zipWith (\g s -> alpha * g ^ (2 :: Int) + (1.0 - alpha) * s) grad s0
 
 updateQNormal gen nSamp std xs q@(QDist{..}) =
   QDist (time + 1) memory' weight newQ prior <$> V.replicateM nSamp (genContinuous newQ gen)
@@ -94,7 +86,6 @@ updateQNormal gen nSamp std xs q@(QDist{..}) =
     eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     tau = 1.0
     epsilon = 1e-16
-    dft = (V.replicate (nParams dist) 0.0)
     grad = gradient q like
     (memory', rho') = rho alpha eta tau epsilon time grad memory
     newQ = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector dist) grad rho'
@@ -115,10 +106,9 @@ propagator xs = runST $ do
   genG <- create
   seed <- V.replicateM 256 (uniform genG)
   gen1 <- initialize seed
-  gen2 <- initialize seed
   let prior = normalDistr 0.0 2.0
   let nSamp = 100
-  let qDist = (normalDistr 0.0 2.0)
+  let qDist = normalDistr 0.0 2.0
   initSamp <- V.replicateM nSamp (genContinuous qDist gen1)
   q <- known $ QDist 1 (V.replicate 2 0) 1 qDist prior initSamp
   updateQNormalProp gen1 nSamp 1.0 xs q
