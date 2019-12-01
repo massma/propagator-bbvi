@@ -91,7 +91,6 @@ gradientAD :: Differentiable a => QDist a -> V.Vector Double -> V.Vector Double
 gradientAD QDist{..} like = V.map (/ (fromIntegral $ V.length summed)) summed
   where
     summed =
-      -- TODO: add prior!!
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
         (\s l -> V.map (* (l + weight * (gradZQ prior (transform dist s) - gradZQ dist (transform dist s)))) (gradNuTransform dist s))
@@ -160,9 +159,8 @@ qNormalPropAD std = qPropAD (normalLikeAD std)
 normalLike std z x = logDensity (normalDistr z std) x
 
 -- | specialize all fmaps to vector???
-normalLikeAD std z  = (V.! 0) . gradNuLogQ (normalDistr z std)
+normalLikeAD std z = (V.! 0) . gradNuLogQ (normalDistr z std)
 
--- propagator :: () -- Maybe VariationalProp
 propagator xs = runST $ do
   genG <- create
   seed <- V.replicateM 256 (uniform genG)
