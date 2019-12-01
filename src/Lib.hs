@@ -16,6 +16,7 @@ import System.Random.MWC (create, GenST, uniform, initialize)
 import qualified System.Random.MWC.Distributions as MWCD
 import Statistics.Distribution
 import Statistics.Distribution.Normal
+import qualified Statistics.Sample as Samp
 
 class VariationalLogic a where
   difference :: a -> a -> Double
@@ -49,9 +50,7 @@ newtype Memory = M (V.Vector Double) deriving (Show, Eq, Ord, Read)
 norm = sqrt . V.sum . V.map (^2)
 
 instance Propagated Memory where
-  merge (M s1) s2
-    | (norm s1 < 1e-16) = Change False (M s1)
-    | otherwise = Change True s2
+  merge (M s1) (M s2) = Change True (M s2) -- always increasing, max at max double for compu
 
 newtype StandardNormal = SN (Time, V.Vector Double) deriving (Show, Eq, Ord, Read)
 
@@ -100,7 +99,7 @@ instance Propagated LogLikelihood where
 -- | Q: should we store prior with QProp? - then would have to pass xs to updateQ
 instance Propagated NormalDistribution where
   merge q1 q2
-    | difference q1 q2 < 0.00001 = Change False q1
+    | difference q1 q2 < 0.00001 = Change False q1 -- 0.00001
     | otherwise = Change True q2
 
 instance VariationalLogic NormalDistribution where
@@ -168,7 +167,7 @@ updateQ prior (T t) (M gradMemory) q s stdNorm l =
   ((M s'), newQ)
   where
     alpha = 0.1 -- from kuckelbier et al
-    eta = 0.01 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     tau = 1.0
     epsilon = 1e-16
     dft = (V.replicate (nParams q) 0.0)
@@ -242,15 +241,17 @@ propagator xs = runST $ do
   mem <- known $ M (V.replicate(nParams  qDist) 0.0)
   resample q stdNorm samp
   normalProp 1.0 xs samp l
+  -- normalPropAD 1.0 xs samp l
   updateQProp gen1 nSamp prior l stdNorm samp q mem
   q' <- content q
   t' <- content stdNorm
-  return (q', fst . fromStandard <$> t')
+  mem' <- content mem
+  return (q', fst . fromStandard <$> t', mem', Samp.mean xs)
 
 someFunc :: IO ()
 someFunc = do
   gen <- create
-  xs <- replicateM 1000 (genContinuous (normalDistr 5.0 3.0) gen)
+  xs <- V.replicateM 1000 (genContinuous (normalDistr 5.0 3.0) gen)
   putStrLn (show $ propagator xs)
 -- >>> someFunc
 --
