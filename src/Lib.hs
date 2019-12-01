@@ -8,10 +8,12 @@ import GHC.Generics (Generic)
 import Control.Monad (replicateM, when)
 import Control.Monad.ST
 import Control.Monad.Primitive
+import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
 import Data.Word (Word32)
 import Numeric.AD (grad', grad, diff, Mode, auto)
 import System.Random.MWC (create, GenST, uniform, initialize)
+import qualified System.Random.MWC.Distributions as MWCD
 import Statistics.Distribution
 import Statistics.Distribution.Normal
 
@@ -26,6 +28,7 @@ class VariationalLogic a where
 class VariationalLogic a => Differentiable a where
   gradNuTransform :: a -> Double -> V.Vector Double
   gradZQ :: a -> Double -> Double
+  transform :: a -> Double -> Double
 
 newtype Time = T Int deriving (Show, Eq, Ord, Read, Num)
 
@@ -41,37 +44,64 @@ instance Propagated Time where
     | t1 >= maxStep = Change False t1
     | otherwise = Change True (T (time t1 + 1))
 
-type S = (V.Vector Double)
+newtype Memory = M (V.Vector Double) deriving (Show, Eq, Ord, Read)
 
+norm = sqrt . V.sum . V.map (^2)
+
+instance Propagated Memory where
+  merge (M s1) s2
+    | (norm s1 < 1e-16) = Change False (M s1)
+    | otherwise = Change True s2
+
+newtype StandardNormal = SN (Time, V.Vector Double) deriving (Show, Eq, Ord, Read)
+
+fromStandard (SN x) = x
+
+instance Propagated (StandardNormal) where
+  merge (SN (t1, v1)) (SN (t2, v2))
+    | t2 > t1 = Change True (SN (t2, v2))
+    | otherwise = Change False (SN (t1, v1))
+
+type Sample = V.Vector Double
+
+instance Propagated Sample where
+  merge s1 s2
+    | (s1 V.! 0) /= (s2 V.! 0) = Change True s2
+    | otherwise = Change False s1
+
+
+type GradLike = V.Vector Double
+type Like = V.Vector Double
 type Count = Int
-type LogLikelihood = (Time, Count, Count, (V.Vector Double))
+type Weight = Double
+data LogLikelihood = LL { timeL :: !Time
+                        , cnt :: Count
+                        , maxCnt :: Count
+                        , gradLike :: !(Maybe (Weight, (V.Vector Double)))
+                        , like :: !(Maybe (Weight, (V.Vector Double)))
+                        }
 
 instance Propagated LogLikelihood where
-  merge (t, cnt, maxCt, v1) (_, _, _, v2)
-    | (cnt == 0) && (newCnt == maxCt)  = Change True ((t+1), 0, maxCt, v2)
-    | (cnt == 0) = Change True ((t+1), newCnt, maxCt, v2)
-    | cnt == maxCt = Change True (t+(T 1), 0, maxCt, (V.zipWith (+) v1 v2))
-    | t >= maxStep = Change False (t, cnt, maxCt, v1)
-    | otherwise = Change True (t, newCnt, maxCt, (V.zipWith (+) v1 v2))
+  merge l1 l2
+    | (cnt l1 == 0) && (newCnt == maxCnt l1)  = Change True (LL (timeL l1 + T 1) 0 (maxCnt l1) (gradLike l2) (like l2))
+    | (cnt l1 == 0) = Change True (LL (timeL l1) newCnt (maxCnt l1) (gradLike l2) (like l2))
+    | cnt l1 == maxCnt l1 = Change True (LL (timeL l1 + T 1) 0 (maxCnt l1) (m gradLike) (m like))
+    | timeL l1 >= maxStep = Change False l1
+    | otherwise = Change True (LL (timeL l1) newCnt (maxCnt l1) (m gradLike) (m like))
     where
-      newCnt = cnt + 1
+      newCnt = cnt l1 + 1
+      m f =
+        case (f l1, f l2) of
+          (Nothing, Nothing) -> Nothing
+          (Just (w1, x1), Just (w2, x2)) -> Just $ (w1 + w2, V.zipWith (+) x1 x2)
+          (Just x1, Nothing) -> Just x1
+          (Nothing, Just x2) -> Just x2
 
 -- | Q: should we store prior with QProp? - then would have to pass xs to updateQ
-type QDistribution = NormalDistribution
-
-data QProp s = Q { gradMemory :: !S
-                 , distribution :: !QDistribution
-                 , generator :: !(GenST s)
-                 , stdSamples :: !(V.Vector Double)
-                 , samples :: !(V.Vector Double)
-                 }
-
-instance Propagated (QProp s) where
+instance Propagated NormalDistribution where
   merge q1 q2
-    | f q1 q2 < 0.00001 = Change False q1
+    | difference q1 q2 < 0.00001 = Change False q1
     | otherwise = Change True q2
-    where
-      f x1 x2 = difference (distribution x1) (distribution x2)
 
 instance VariationalLogic NormalDistribution where
   difference x1 x2 = sqrt (f mean + f stdDev)
@@ -89,22 +119,28 @@ instance VariationalLogic NormalDistribution where
 instance Differentiable NormalDistribution where
   gradZQ d z = -(z - mean d)/(2 * stdDev d ** 2)
   gradNuTransform d epsilon = V.fromList [1.0 , epsilon]
+  transform d epsilon = mean d + stdDev d * epsilon
 
-gradient dist like samples = V.map (/ (fromIntegral $ V.length summed)) summed
+gradient total dist Nothing samples = Nothing
+gradient total dist (Just (cnt, like)) samples = Just $ V.map (/ (fromIntegral $ V.length summed)) summed
   where
+    factor = cnt / total
     summed =
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
-        (\s l -> V.map (* (l - logProb dist s)) (gradNuLogQ dist s))
+        (\s l -> V.map (* (l - factor * logProb dist s)) (gradNuLogQ dist s))
         samples
         like
 
-gradientAD dist like transformedSamples samples = V.map (/ (fromIntegral $ V.length summed)) summed
+gradientAD total dist Nothing transformedSamples samples = Nothing
+gradientAD total dist (Just (cnt, like)) transformedSamples samples = Just $ V.map (/ (fromIntegral $ V.length summed)) summed
   where
+    factor = cnt / total
     summed =
+      -- TODO: add prior!!
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith3
-        (\tS s l -> V.map (* (l - gradZQ dist tS)) (gradNuTransform dist s))
+        (\tS s l -> V.map (* (l - factor * gradZQ dist tS)) (gradNuTransform dist s))
         transformedSamples
         samples
         like
@@ -123,59 +159,70 @@ rho alpha eta tau epsilon t grad s0 =
 -- >>> rho 0.1 0.01 1.0 1e-16 1 (V.fromList [0.0, 0.0]) (V.fromList [0.0, 0.0])
 -- ([0.0,0.0],[1.0e-2,1.0e-2])
 
-updateQ gradF nSamp Q{..} (T t) l =
-  Q s' newDist generator <$> V.replicateM nSamp (genContinuous newDist generator)
+resample q stdNorm derived =
+  watch q $ \q' ->
+    with stdNorm $ \(SN (_t', s')) ->
+      write derived $ V.map (transform q') s'
+
+updateQ (T t) (M gradMemory) q s stdNorm l =
+  ((M s'), newQ)
   where
     alpha = 0.1 -- from kuckelbier et al
     eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     tau = 1.0
     epsilon = 1e-16
-    grad = gradF distribution l samples
+    dft = (V.replicate (nParams q) 0.0)
+    gradAD = fromMaybe dft  $ gradientAD (fromIntegral (maxCnt l)) q (gradLike l) s stdNorm
+    gradS = fromMaybe dft $ gradient (fromIntegral (maxCnt l)) q (like l) s
+    grad = V.zipWith (+) gradAD gradS
     (s', rho') = rho alpha eta tau epsilon t grad gradMemory
-    newDist = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector distribution) grad rho'
+    newQ = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector q) grad rho'
 -- >>> create >>= \gen -> updateQ 10 (Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty) 1
 
-updatePropQ nSamp t q lAD l =
-  watch l $ \(tl, _cnt, _maxCnt, l') ->
-    with t $ \tGlobal -> when (tl == tGlobal) $
+updateQProp gen nSamp prior l stdNorm s q memory =
+  watch l $ \l' ->
+    with stdNorm $ \(SN (tGlobal, stdNorm')) ->
+      when (timeL l' == tGlobal) $
       with q $ \q' ->
-          updateQ gradient nSamp q' tGlobal l' >>= \newq -> write t (T 1) >> write q newq
+        with s $ \s' ->
+          with memory $ \mem' ->
+            let (memNew, qNew) = updateQ tGlobal mem' q' s' stdNorm' l'
+             in V.replicateM nSamp (MWCD.standard gen) >>= \newSamp ->
+                  write stdNorm (SN (timeL l' + (T 1), newSamp)) >>
+                  write memory memNew >>
+                  write q qNew
 
-updatePropQAD nSamp t q lAD l =
-  watch l $ \(tl, _cnt, _maxCnt, l') ->
-    with t $ \tGlobal -> when (tl == tGlobal) $
-      with q $ \q' ->
-          updateQ gradientAD nSamp q' tGlobal l' >>= \newq -> write t (T 1) >> write q newq
-
--- | don't forget prior with variational distribution - thin kmaybe we
+-- | don't forget prior with variational distribution - think maybe we
 -- should icnorporate prior into QProp and use it when we update q
 -- TODO: consider setting explicit minimum on stddev
 
-normalPropAD prior std xs q l = do
-  watch q $ \qprop ->
+normalPropAD std xs s l = do
+  watch s $ \s' ->
     write
       l
-      ( (T 1)
-      , (1 :: Int)
-      , (1 :: Int)
-      , (fmap
-           (\mu ->
-              gradZQ prior mu + -- TODO: move prior updateQ
-              (sum $ fmap (gradZQ (normalDistr mu std)) xs))
-           (samples qprop)))
+      (LL
+         (T 1)
+         (1 :: Int)
+         (1 :: Int)
+         (Just
+            ( 1.0
+            , (fmap (\mu -> (sum $ fmap (gradZQ (normalDistr mu std)) xs)) s')))
+         Nothing)
 
-normalProp prior std xs q l = do
-  watch q $ \qprop ->
+normalProp std xs s l = do
+  watch s $ \s' ->
     write
       l
-      ( (T 1)
-      , (1 :: Int)
-      , (1 :: Int)
-      , (fmap
-           (\mu ->
-              logDensity prior mu + -- TODO: move prior updateQ
-              (sum $ fmap (logDensity (normalDistr mu std)) xs))
-           (samples qprop)))
+      (LL
+         (T 1)
+         (1 :: Int)
+         (1 :: Int)
+         Nothing
+         (Just
+            ( 1.0
+            , (fmap
+                 (\mu -> (sum $ fmap (logDensity (normalDistr mu std)) xs))
+                 s'))))
 
 -- propagator :: () -- Maybe VariationalProp
 propagator xs = runST $ do
@@ -187,14 +234,18 @@ propagator xs = runST $ do
   let nSamp = 100
   let qDist = (normalDistr 0.0 2.0)
   initSamp <- V.replicateM nSamp (genContinuous qDist gen1)
-  q1 <- known $ Q (V.fromList [0.0, 0.0]) qDist gen1 initSamp
-  t1 <- known $ T 1
-  l1 <- cell
-  normalProp prior 1.0 xs q1 l1
-  updatePropQ nSamp t1 q1 l1
-  q1' <- content q1
-  t1' <- content t1
-  return (distribution <$> q1', time <$> t1')
+  initStandard <- V.replicateM nSamp (MWCD.standard gen1)
+  q <- known $ qDist
+  stdNorm <- known $ SN (T 1, initSamp)
+  l <- cell
+  samp <- cell
+  mem <- known $ M (V.replicate(nParams  qDist) 0.0)
+  resample q stdNorm samp
+  normalProp 1.0 xs samp l
+  updateQProp gen1 nSamp prior l stdNorm samp q mem
+  q' <- content q
+  t' <- content stdNorm
+  return (q', fst . fromStandard <$> t')
 
 someFunc :: IO ()
 someFunc = do
