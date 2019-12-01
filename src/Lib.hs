@@ -59,6 +59,7 @@ fromStandard (SN x) = x
 
 instance Propagated (StandardNormal) where
   merge (SN (t1, v1)) (SN (t2, v2))
+    | t1 >= maxStep = Change False (SN (t1, v1))
     | t2 > t1 = Change True (SN (t2, v2))
     | otherwise = Change False (SN (t1, v1))
 
@@ -68,7 +69,6 @@ instance Propagated Sample where
   merge s1 s2
     | (s1 V.! 0) /= (s2 V.! 0) = Change True s2
     | otherwise = Change False s1
-
 
 type GradLike = V.Vector Double
 type Like = V.Vector Double
@@ -117,30 +117,30 @@ instance VariationalLogic NormalDistribution where
       std = stdDev d
 
 instance Differentiable NormalDistribution where
-  gradZQ d z = -(z - mean d)/(2 * stdDev d ** 2)
+  gradZQ d z = -(z - mean d)/(stdDev d ** 2)
   gradNuTransform d epsilon = V.fromList [1.0 , epsilon]
   transform d epsilon = mean d + stdDev d * epsilon
 
-gradient total dist Nothing samples = Nothing
-gradient total dist (Just (cnt, like)) samples = Just $ V.map (/ (fromIntegral $ V.length summed)) summed
+gradient prior total dist Nothing samples = Nothing
+gradient prior total dist (Just (cnt, like)) samples = Just $ V.map (/ (fromIntegral $ V.length summed)) summed
   where
     factor = cnt / total
     summed =
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
-        (\s l -> V.map (* (l - factor * logProb dist s)) (gradNuLogQ dist s))
+        (\s l -> V.map (* (l + factor * (logDensity prior s - logProb dist s))) (gradNuLogQ dist s))
         samples
         like
 
-gradientAD total dist Nothing transformedSamples samples = Nothing
-gradientAD total dist (Just (cnt, like)) transformedSamples samples = Just $ V.map (/ (fromIntegral $ V.length summed)) summed
+gradientAD prior total dist Nothing transformedSamples samples = Nothing
+gradientAD prior total dist (Just (cnt, like)) transformedSamples samples = Just $ V.map (/ (fromIntegral $ V.length summed)) summed
   where
     factor = cnt / total
     summed =
       -- TODO: add prior!!
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith3
-        (\tS s l -> V.map (* (l - factor * gradZQ dist tS)) (gradNuTransform dist s))
+        (\tS s l -> V.map (* (l + factor * (gradZQ prior tS - gradZQ dist tS))) (gradNuTransform dist s))
         transformedSamples
         samples
         like
@@ -164,16 +164,16 @@ resample q stdNorm derived =
     with stdNorm $ \(SN (_t', s')) ->
       write derived $ V.map (transform q') s'
 
-updateQ (T t) (M gradMemory) q s stdNorm l =
+updateQ prior (T t) (M gradMemory) q s stdNorm l =
   ((M s'), newQ)
   where
     alpha = 0.1 -- from kuckelbier et al
-    eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    eta = 0.01 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     tau = 1.0
     epsilon = 1e-16
     dft = (V.replicate (nParams q) 0.0)
-    gradAD = fromMaybe dft  $ gradientAD (fromIntegral (maxCnt l)) q (gradLike l) s stdNorm
-    gradS = fromMaybe dft $ gradient (fromIntegral (maxCnt l)) q (like l) s
+    gradAD = fromMaybe dft  $ gradientAD prior (fromIntegral (maxCnt l)) q (gradLike l) s stdNorm
+    gradS = fromMaybe dft $ gradient prior (fromIntegral (maxCnt l)) q (like l) s
     grad = V.zipWith (+) gradAD gradS
     (s', rho') = rho alpha eta tau epsilon t grad gradMemory
     newQ = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector q) grad rho'
@@ -186,7 +186,7 @@ updateQProp gen nSamp prior l stdNorm s q memory =
       with q $ \q' ->
         with s $ \s' ->
           with memory $ \mem' ->
-            let (memNew, qNew) = updateQ tGlobal mem' q' s' stdNorm' l'
+            let (memNew, qNew) = updateQ prior tGlobal mem' q' s' stdNorm' l'
              in V.replicateM nSamp (MWCD.standard gen) >>= \newSamp ->
                   write stdNorm (SN (timeL l' + (T 1), newSamp)) >>
                   write memory memNew >>
@@ -206,7 +206,7 @@ normalPropAD std xs s l = do
          (1 :: Int)
          (Just
             ( 1.0
-            , (fmap (\mu -> (sum $ fmap (gradZQ (normalDistr mu std)) xs)) s')))
+            , (fmap (\mu -> (sum $ fmap ((V.! 0) . gradNuLogQ (normalDistr mu std)) xs)) s')))
          Nothing)
 
 normalProp std xs s l = do
