@@ -515,3 +515,38 @@ user	0m39.076s
 sys	0m5.692s
 
 Compilation finished at Mon Dec  2 12:35:43
+* after making obs a sample-able propagator
+
+(normalDistr 5.049435636395849 9.98830321687391e-2,5574,5.064943538470939,1,1000)
+  12,986,638,376 bytes allocated in the heap
+     348,854,616 bytes copied during GC
+       1,532,024 bytes maximum residency (145 sample(s))
+         120,872 bytes maximum slop
+               1 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     12343 colls, 12343 par    1.856s   0.549s     0.0000s    0.0074s
+  Gen  1       145 colls,   144 par    0.128s   0.040s     0.0003s    0.0007s
+
+  Parallel GC work balance: 24.45% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    3.544s  (  3.955s elapsed)
+  GC      time    1.984s  (  0.589s elapsed)
+  EXIT    time    0.000s  (  0.005s elapsed)
+  Total   time    5.528s  (  4.550s elapsed)
+
+  Alloc rate    3,664,401,347 bytes per MUT second
+
+  Productivity  64.1% of total user, 86.9% of total elapsed
+
+
+real	0m4.650s
+user	0m5.632s
+sys	0m1.420s
+
+Compilation finished at Mon Dec  2 14:52:15

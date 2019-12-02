@@ -7,7 +7,7 @@ import Data.Propagator
 import Control.Monad.ST
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
-import System.Random.MWC (create, uniform, initialize, GenST)
+import System.Random.MWC (create, uniform, initialize, GenST, uniformR)
 import Statistics.Distribution
 import Statistics.Distribution.Normal
 import qualified System.Random.MWC.Distributions as MWCD
@@ -30,7 +30,7 @@ class VariationalLogic a => Differentiable a where
 type Time = Int
 
 maxStep :: Time
-maxStep = 10000 -- 100000
+maxStep = 100000 -- 4664 -- 100000
 -- | time can only increase in increments of 1. syntax is to write t
 -- to 1, b/c that way an empty t starts at 1
 
@@ -53,12 +53,30 @@ data Node a = Node
   , memory :: !Memory
   , weight :: !Weight
   , dist :: !a
-  , prior :: !NormalDistribution
+  , prior :: !a
   , rhoF :: !(V.Vector Double -> Node a -> (Memory, V.Vector Double))
   }
 
 norm :: V.Vector Double -> Double
 norm = sqrt . V.sum . V.map (^ (2 :: Int))
+
+newtype Obs = O (V.Vector Double) deriving (Show, Eq, Ord, Read)
+
+fromO (O v) = v
+
+instance VariationalLogic Obs where
+  logProb _d _x = 0.0
+  paramVector (O d) = d
+  fromParamVector v = (O v)
+  gradNuLogQ _d _x = V.empty
+  nParams _d = 0
+  transform _d eps = eps
+  resample (O d) gen =
+    return . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
+
+instance Differentiable Obs where
+  gradNuTransform _d _x = V.empty
+  gradZQ _d _x = 0.0
 
 instance VariationalLogic a => Propagated (PropNode a) where
   merge (N node) (U (deltaM, g))
@@ -139,11 +157,7 @@ rho alpha eta tau epsilon grad Node{..} =
 
 -- | TODO: try making obs a Node and see if it still performant
 -- implement weight on each propgator, and then divide by each
--- variationa distributions' factor (I was doing this wrong). also
--- there are more differences between AD and score gradient
--- propagators: likelihood propagators return a likelihood as a
--- function, which is the same for all nodes, but the ad will return a
--- different gradient for each node.
+-- variationa distributions' factor (I was doing this wrong).
 qProp ::
      VariationalLogic a
   => (a -> ST s (Weight, V.Vector Double, Sample))
@@ -160,6 +174,30 @@ qPropAD ::
 qPropAD likeFunc q =
   watch q $ \(N q') -> write q =<< (gradientAD q' <$> likeFunc (dist q'))
 
+qProp2 ::
+     (VariationalLogic a, VariationalLogic b)
+  => ((a, b) -> ST s (Weight, V.Vector Double, (Sample, Sample)))
+  -> (Cell s (PropNode a), Cell s (PropNode b))
+  -> ST s ()
+qProp2 likeFunc (q1, q2) =
+  watch q1 $ \(N q1') ->
+    watch q2 $ \(N q2') -> do
+      (w, l, (s1, s2)) <- likeFunc (dist q1', dist q2')
+      write q1 (gradient q1' (w, l, s1))
+      write q2 (gradient q2' (w, l, s2))
+
+qPropAD2 ::
+     (Differentiable a, Differentiable b)
+  => ((a, b) -> ST s ((Weight, V.Vector Double, Sample), (Weight, V.Vector Double, Sample)))
+  -> (Cell s (PropNode a), Cell s (PropNode b))
+  -> ST s ()
+qPropAD2 likeFunc (q1, q2) =
+  watch q1 $ \(N q1') ->
+    watch q2 $ \(N q2') -> do
+      (l1, l2) <- likeFunc (dist q1', dist q2')
+      write q1 (gradientAD q1' l1)
+      write q2 (gradientAD q2' l2)
+
 normalLike nSamp std gen xs q =
   V.replicateM nSamp (resample q gen) >>= \samples ->
     return
@@ -169,6 +207,17 @@ normalLike nSamp std gen xs q =
              V.sum $ V.map (logDensity (normalDistr (transform q eps) std)) xs)
           samples
       , samples)
+
+normalLike2 nSamp nObs std gen (xs, q) = do
+  samples <- V.replicateM nSamp (resample q gen)
+  obs <- V.replicateM nSamp (resample xs gen)
+  return
+    ( fromIntegral nObs
+    , V.map
+        (\eps ->
+           V.sum $ V.map (logDensity (normalDistr (transform q eps) std)) obs)
+        samples
+    , (V.empty, samples))
 
 -- | specialize all fmaps to vector???
 -- CAREFUL: with rao-blackweixation and my wieghting approach, all terms
@@ -184,22 +233,42 @@ normalLikeAD nSamp std gen xs q =
           samples
       , samples)
 
+normalLikeAD2 nSamp nObs std gen (xs, q) = do
+  obs <- V.replicateM nObs (resample xs gen)
+  samples <- V.replicateM nSamp (resample q gen)
+  return
+    ( ( (fromIntegral nObs)
+      , V.empty
+      , V.empty)
+    , ( (fromIntegral nObs)
+      , V.map
+          (\eps ->
+             V.sum $
+             V.map
+               ((V.! 0) . gradNuLogQ (normalDistr (transform q eps) std))
+               obs)
+          samples
+      , samples))
+
 propagator xs = runST $ do
   genG <- create
-  seed <- V.replicateM 256 (uniform genG)
-  gen1 <- initialize seed
+  gen1 <- initialize =<< V.replicateM 256 (uniform genG)
   let prior = normalDistr 0.0 2.0
   let nSamp = 100
   let qDist = normalDistr 0.0 2.0
   let alpha = 0.1 -- from kuckelbier et al
   let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
   let tau = 1.0
-  let epsilon = 1e-16
-  q <- known $ (N (Node 1 (V.replicate 2 0) (fromIntegral $ V.length xs) qDist prior (rho alpha eta tau epsilon)))
+  let epsilon = 1e-16 -- (fromIntegral $ V.length xs)
+  let xDist = (O xs)
+  q <- known $ N (Node 1 (V.replicate 2 0) (fromIntegral nSamp) qDist prior (rho alpha eta tau epsilon))
+  xProp <- known $ N (Node 1 (V.empty) 0 xDist (O V.empty)  (\_x1 _x2 -> (V.empty, V.empty)))
   -- qNormalProp 1.0 gen1 nSamp xs q
-  qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
+  -- qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
+  qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
   (N q') <- fromMaybe (error "impos") <$> content q
-  return (dist q', time q', Samp.mean xs)
+  (N xs') <- fromMaybe (error "impos") <$> content xProp
+  return (dist q', time q', Samp.mean xs, time xs', V.length . fromO . dist $ xs')
 
 someFunc :: IO ()
 someFunc = do
