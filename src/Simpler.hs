@@ -57,15 +57,22 @@ data Node a = Node
   , rhoF :: !(V.Vector Double -> Node a -> (Memory, V.Vector Double))
   }
 
+norm :: V.Vector Double -> Double
 norm = sqrt . V.sum . V.map (^ (2 :: Int))
 
 instance VariationalLogic a => Propagated (PropNode a) where
-  merge (N node) (U (m, g))
+  merge (N node) (U (deltaM, g))
     | norm g < 0.00001 = Change False (N node) -- 0.00001
     | time node >= maxStep = Change False (N node)
     | otherwise = Change True updateNode
     where
-      updateNode = N (node {time = (time node) + 1, memory = m, dist = newQ})
+      updateNode =
+        N
+          (node
+             { time = (time node) + 1
+             , memory = V.zipWith (+) (memory node) deltaM
+             , dist = newQ
+             })
         where
           newQ = fromParamVector $ V.zipWith (+) (paramVector (dist node)) g
   merge (U _) _ = Contradiction mempty "Trying to update a gradient"
@@ -103,7 +110,7 @@ gradient q@(Node{..}) (nFactors, like, samples) =
 -- | TODO: speed up by calc length in one pass
 gradientAD :: Differentiable a => Node a -> (Weight, V.Vector Double, Sample) -> PropNode a
 gradientAD q@(Node {..}) (nFactors, like, samples) =
-  U (memory', V.zipWith (*) rho' grad)
+  U (deltaMem, V.zipWith (*) rho' grad)
   where
     summed =
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
@@ -118,17 +125,17 @@ gradientAD q@(Node {..}) (nFactors, like, samples) =
         samples
         like
     grad = V.map (/ (fromIntegral $ V.length summed)) summed
-    (memory', rho') = rhoF grad q
+    (deltaMem, rho') = rhoF grad q
 
 rho alpha eta tau epsilon grad Node{..} =
-  ( memNew
-  , V.map
-      (\s ->
+  ( deltaM
+  , V.zipWith
+      (\ds s ->
          eta * (fromIntegral time) ** (negate 0.5 + epsilon) *
-         (1.0 / (tau + sqrt s)))
-      memNew)
+         (1.0 / (tau + sqrt (s + ds))))
+      deltaM memory)
   where
-    memNew = V.zipWith (\g s -> alpha * g ^ (2 :: Int) + (1.0 - alpha) * s) grad memory
+    deltaM = V.zipWith (\g s -> alpha * g ^ (2 :: Int) - alpha * s) grad memory
 
 -- | TODO: try making obs a Node and see if it still performant
 -- implement weight on each propgator, and then divide by each
@@ -164,8 +171,8 @@ normalLike nSamp std gen xs q =
       , samples)
 
 -- | specialize all fmaps to vector???
--- CAREFUL: with rao-blackweixation and my wieghtinga pproach, all terms
--- in log likelihood must contain all nodes q
+-- CAREFUL: with rao-blackweixation and my wieghting approach, all terms
+-- in log likelihood functions must contain all nodes q
 normalLikeAD nSamp std gen xs q =
   V.replicateM nSamp (resample q gen) >>= \samples ->
     return
