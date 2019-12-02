@@ -87,22 +87,22 @@ instance Differentiable NormalDistribution where
   gradZQ d z = -(z - mean d)/(stdDev d ** 2)
   gradNuTransform _d epsilon = V.fromList [1.0 , epsilon]
 
-gradient :: VariationalLogic a => Node a -> (V.Vector Double, Sample) -> PropNode a
-gradient q@(Node{..}) (like, samples) =
+gradient :: VariationalLogic a => Node a -> (Weight, V.Vector Double, Sample) -> PropNode a
+gradient q@(Node{..}) (nFactors, like, samples) =
   U (memory', V.zipWith (*) rho' grad)
   where
     summed =
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
-        (\s l -> V.map (* (l + weight * (logProb prior s - logProb dist s))) (gradNuLogQ dist s))
+        (\s l -> V.map (* (l + nFactors / weight * (logProb prior s - logProb dist s))) (gradNuLogQ dist s))
         samples
         like
     grad = V.map (/ (fromIntegral $ V.length summed)) summed
     (memory', rho') = rhoF grad q
 
 -- | TODO: speed up by calc length in one pass
-gradientAD :: Differentiable a => Node a -> (V.Vector Double, Sample) -> PropNode a
-gradientAD q@(Node {..}) (like, samples) =
+gradientAD :: Differentiable a => Node a -> (Weight, V.Vector Double, Sample) -> PropNode a
+gradientAD q@(Node {..}) (nFactors, like, samples) =
   U (memory', V.zipWith (*) rho' grad)
   where
     summed =
@@ -111,7 +111,7 @@ gradientAD q@(Node {..}) (like, samples) =
         (\s l ->
            V.map
              (* (l +
-                 weight *
+                 nFactors / weight *
                  (gradZQ prior (transform dist s) -
                   gradZQ dist (transform dist s))))
              (gradNuTransform dist s))
@@ -132,14 +132,14 @@ rho alpha eta tau epsilon grad Node{..} =
 
 -- | TODO: try making obs a Node and see if it still performant
 -- implement weight on each propgator, and then divide by each
--- variationa distributions' factor (I was doing this wrong) also
+-- variationa distributions' factor (I was doing this wrong). also
 -- there are more differences between AD and score gradient
--- propagators: AD propagators return a vector as a function finally:
--- we can refactor q generic, and make a separate "q update" function.
--- should just be a composition of updateq . gradient . likelihood $ q
+-- propagators: likelihood propagators return a likelihood as a
+-- function, which is the same for all nodes, but the ad will return a
+-- different gradient for each node.
 qProp ::
      VariationalLogic a
-  => (a -> ST s (V.Vector Double, Sample))
+  => (a -> ST s (Weight, V.Vector Double, Sample))
   -> Cell s (PropNode a)
   -> ST s ()
 qProp likeFunc q =
@@ -147,7 +147,7 @@ qProp likeFunc q =
 
 qPropAD ::
      Differentiable a
-  => (a -> ST s (V.Vector Double, Sample))
+  => (a -> ST s (Weight, V.Vector Double, Sample))
   -> Cell s (PropNode a)
   -> ST s ()
 qPropAD likeFunc q =
@@ -156,17 +156,21 @@ qPropAD likeFunc q =
 normalLike nSamp std gen xs q =
   V.replicateM nSamp (resample q gen) >>= \samples ->
     return
-      ( V.map
+      ( fromIntegral $ V.length xs
+      , V.map
           (\eps ->
              V.sum $ V.map (logDensity (normalDistr (transform q eps) std)) xs)
           samples
       , samples)
 
 -- | specialize all fmaps to vector???
+-- CAREFUL: with rao-blackweixation and my wieghtinga pproach, all terms
+-- in log likelihood must contain all nodes q
 normalLikeAD nSamp std gen xs q =
   V.replicateM nSamp (resample q gen) >>= \samples ->
     return
-      ( V.map
+      ( fromIntegral $ V.length xs
+      , V.map
           (\eps ->
              V.sum $
              V.map ((V.! 0) . gradNuLogQ (normalDistr (transform q eps) std)) xs)
@@ -184,7 +188,7 @@ propagator xs = runST $ do
   let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
   let tau = 1.0
   let epsilon = 1e-16
-  q <- known $ (N (Node 1 (V.replicate 2 0) 1 qDist prior (rho alpha eta tau epsilon)))
+  q <- known $ (N (Node 1 (V.replicate 2 0) (fromIntegral $ V.length xs) qDist prior (rho alpha eta tau epsilon)))
   -- qNormalProp 1.0 gen1 nSamp xs q
   qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
   (N q') <- fromMaybe (error "impos") <$> content q
