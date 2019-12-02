@@ -480,3 +480,38 @@ user	1m11.928s
 sys	0m21.448s
 
 Compilation finished at Sun Dec  1 14:32:59
+* refactored to do correct updating based ong radient
+
+(normalDistr 5.063682480265621 3.1619719070280466e-2,4664,5.064943538470939)
+ 104,842,605,848 bytes allocated in the heap
+     535,700,696 bytes copied during GC
+       1,290,952 bytes maximum residency (196 sample(s))
+         121,688 bytes maximum slop
+               1 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     100487 colls, 100487 par   10.024s   2.268s     0.0000s    0.0135s
+  Gen  1       196 colls,   195 par    0.164s   0.058s     0.0003s    0.0101s
+
+  Parallel GC work balance: 18.69% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time   28.748s  ( 30.726s elapsed)
+  GC      time   10.188s  (  2.325s elapsed)
+  EXIT    time    0.004s  (  0.009s elapsed)
+  Total   time   38.940s  ( 33.061s elapsed)
+
+  Alloc rate    3,646,953,034 bytes per MUT second
+
+  Productivity  73.8% of total user, 92.9% of total elapsed
+
+
+real	0m33.171s
+user	0m39.076s
+sys	0m5.692s
+
+Compilation finished at Mon Dec  2 12:35:43

@@ -14,19 +14,18 @@ import qualified System.Random.MWC.Distributions as MWCD
 import qualified Statistics.Sample as Samp
 
 class VariationalLogic a where
-  difference :: a -> a -> Double
   logProb :: a -> Double -> Double
   paramVector :: a -> V.Vector Double
   fromParamVector :: V.Vector Double -> a
   gradNuLogQ :: a -> Double -> V.Vector Double -- nu are parameters to variational family
   nParams :: a -> Int
   transform :: a -> Double -> Double
+  -- inv transform?
   resample :: a -> GenST s -> ST s Double
 
 class VariationalLogic a => Differentiable a where
   gradNuTransform :: a -> Double -> V.Vector Double
   gradZQ :: a -> Double -> Double
-
 
 type Time = Int
 
@@ -39,31 +38,43 @@ type Memory = V.Vector Double
 
 type Sample = V.Vector Double
 
+type Likelihood = V.Vector Double
+
 type Weight = Double
 
-data QDist a = QDist
+type Gradient = V.Vector Double
+
+type GradUpdate = (Memory, Gradient)
+
+data PropNode a = N (Node a) | U GradUpdate
+
+data Node a = Node
   { time :: !Time
   , memory :: !Memory
   , weight :: !Weight
   , dist :: !a
   , prior :: !NormalDistribution
-  , samples :: !Sample
-  , rhoF :: !(V.Vector Double -> QDist a -> (Memory, V.Vector Double))
+  , rhoF :: !(V.Vector Double -> Node a -> (Memory, V.Vector Double))
   }
 
-instance VariationalLogic a => Propagated (QDist a) where
-  merge q1 q2
-    | difference (dist q1) (dist q2) < 0.00001 = Change False q1 -- 0.00001
-    | time q1 >= maxStep = Change False q1
-    | otherwise = Change True q2
+norm = sqrt . V.sum . V.map (^ (2 :: Int))
+
+instance VariationalLogic a => Propagated (PropNode a) where
+  merge (N node) (U (m, g))
+    | norm g < 0.00001 = Change False (N node) -- 0.00001
+    | time node >= maxStep = Change False (N node)
+    | otherwise = Change True updateNode
+    where
+      updateNode = N (node {time = (time node) + 1, memory = m, dist = newQ})
+        where
+          newQ = fromParamVector $ V.zipWith (+) (paramVector (dist node)) g
+  merge (U _) _ = Contradiction mempty "Trying to update a gradient"
+  merge (N _) (N _) = Contradiction mempty "Trying overwrite a node"
 
 instance VariationalLogic NormalDistribution where
-  difference x1 x2 = sqrt (f mean + f stdDev)
-    where
-      f g = (g x1 - g x2) ^ (2 :: Int)
   logProb = logDensity
   paramVector d = V.fromList [mean d, stdDev d]
-  fromParamVector v = normalDistr (v V.! 0) (v V.! 1)
+  fromParamVector v = normalDistr (v V.! 0) ((v V.! 1))
   nParams _d = 2
   gradNuLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
     where
@@ -76,9 +87,9 @@ instance Differentiable NormalDistribution where
   gradZQ d z = -(z - mean d)/(stdDev d ** 2)
   gradNuTransform _d epsilon = V.fromList [1.0 , epsilon]
 
-
-gradient :: VariationalLogic a => QDist a -> V.Vector Double -> V.Vector Double
-gradient QDist{..} like = V.map (/ (fromIntegral $ V.length summed)) summed
+gradient :: VariationalLogic a => Node a -> (V.Vector Double, Sample) -> PropNode a
+gradient q@(Node{..}) (like, samples) =
+  U (memory', V.zipWith (*) rho' grad)
   where
     summed =
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
@@ -86,18 +97,30 @@ gradient QDist{..} like = V.map (/ (fromIntegral $ V.length summed)) summed
         (\s l -> V.map (* (l + weight * (logProb prior s - logProb dist s))) (gradNuLogQ dist s))
         samples
         like
+    grad = V.map (/ (fromIntegral $ V.length summed)) summed
+    (memory', rho') = rhoF grad q
 
-gradientAD :: Differentiable a => QDist a -> V.Vector Double -> V.Vector Double
-gradientAD QDist{..} like = V.map (/ (fromIntegral $ V.length summed)) summed
+-- | TODO: speed up by calc length in one pass
+gradientAD :: Differentiable a => Node a -> (V.Vector Double, Sample) -> PropNode a
+gradientAD q@(Node {..}) (like, samples) =
+  U (memory', V.zipWith (*) rho' grad)
   where
     summed =
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
-        (\s l -> V.map (* (l + weight * (gradZQ prior (transform dist s) - gradZQ dist (transform dist s)))) (gradNuTransform dist s))
+        (\s l ->
+           V.map
+             (* (l +
+                 weight *
+                 (gradZQ prior (transform dist s) -
+                  gradZQ dist (transform dist s))))
+             (gradNuTransform dist s))
         samples
         like
+    grad = V.map (/ (fromIntegral $ V.length summed)) summed
+    (memory', rho') = rhoF grad q
 
-rho alpha eta tau epsilon grad QDist{..} =
+rho alpha eta tau epsilon grad Node{..} =
   ( memNew
   , V.map
       (\s ->
@@ -107,59 +130,48 @@ rho alpha eta tau epsilon grad QDist{..} =
   where
     memNew = V.zipWith (\g s -> alpha * g ^ (2 :: Int) + (1.0 - alpha) * s) grad memory
 
-qGeneric gradF likeFunc gen nSamp xs q@(QDist{..}) = do
-  s <- V.replicateM nSamp (resample newQ gen)
-  return $ q {time = time + 1, memory = memory', dist = newQ, samples = s} -- QDist (time + 1) memory' weight newQ prior s rhoF
-  where
-    like = V.map (\mu -> (sum $ V.map (likeFunc (transform dist mu)) xs)) samples
-    grad = gradF q like
-    (memory', rho') = rhoF grad q
-    newQ = fromParamVector $ V.zipWith3 (\x g r -> x + r*g) (paramVector dist) grad rho'
--- >>> create >>= \gen -> updateQ 10 (Q (V.fromList [0.0, 0.0]) (normalDistr 0.0 2.0) gen V.empty V.empty) 1
-
-qPropGeneric ::
-  VariationalLogic a =>
-     (QDist a -> V.Vector Double -> V.Vector Double)
-  -> (Double -> Double -> Double)
-  -> GenST s
-  -> Int
-  -> V.Vector Double
-  -> Cell s (QDist a)
-  -> ST s ()
-qPropGeneric gradF likeFunc gen nSamp xs q =
-  watch q $ \q' -> do
-    write q =<< qGeneric gradF likeFunc gen nSamp xs q'
-
+-- | TODO: try making obs a Node and see if it still performant
+-- implement weight on each propgator, and then divide by each
+-- variationa distributions' factor (I was doing this wrong) also
+-- there are more differences between AD and score gradient
+-- propagators: AD propagators return a vector as a function finally:
+-- we can refactor q generic, and make a separate "q update" function.
+-- should just be a composition of updateq . gradient . likelihood $ q
 qProp ::
-  VariationalLogic a =>
-  (Double -> Double -> Double)
-  -> GenST s
-  -> Int
-  -> V.Vector Double
-  -> Cell s (QDist a)
+     VariationalLogic a
+  => (a -> ST s (V.Vector Double, Sample))
+  -> Cell s (PropNode a)
   -> ST s ()
-qProp = qPropGeneric gradient
+qProp likeFunc q =
+  watch q $ \(N q') -> write q =<< (gradient q' <$> likeFunc (dist q'))
 
 qPropAD ::
-  Differentiable a =>
-  (Double -> Double -> Double)
-  -> GenST s
-  -> Int
-  -> V.Vector Double
-  -> Cell s (QDist a)
+     Differentiable a
+  => (a -> ST s (V.Vector Double, Sample))
+  -> Cell s (PropNode a)
   -> ST s ()
-qPropAD = qPropGeneric gradientAD
+qPropAD likeFunc q =
+  watch q $ \(N q') -> write q =<< (gradientAD q' <$> likeFunc (dist q'))
 
-qNormalProp :: VariationalLogic a => Double -> GenST s -> Int -> V.Vector Double -> Cell s (QDist a) -> ST s ()
-qNormalProp std = qProp (normalLike std)
-
-qNormalPropAD :: Differentiable a => Double -> GenST s -> Int -> V.Vector Double -> Cell s (QDist a) -> ST s ()
-qNormalPropAD std = qPropAD (normalLikeAD std)
-
-normalLike std z x = logDensity (normalDistr z std) x
+normalLike nSamp std gen xs q =
+  V.replicateM nSamp (resample q gen) >>= \samples ->
+    return
+      ( V.map
+          (\eps ->
+             V.sum $ V.map (logDensity (normalDistr (transform q eps) std)) xs)
+          samples
+      , samples)
 
 -- | specialize all fmaps to vector???
-normalLikeAD std z = (V.! 0) . gradNuLogQ (normalDistr z std)
+normalLikeAD nSamp std gen xs q =
+  V.replicateM nSamp (resample q gen) >>= \samples ->
+    return
+      ( V.map
+          (\eps ->
+             V.sum $
+             V.map ((V.! 0) . gradNuLogQ (normalDistr (transform q eps) std)) xs)
+          samples
+      , samples)
 
 propagator xs = runST $ do
   genG <- create
@@ -168,15 +180,14 @@ propagator xs = runST $ do
   let prior = normalDistr 0.0 2.0
   let nSamp = 100
   let qDist = normalDistr 0.0 2.0
-  stdNormal <- V.replicateM nSamp (MWCD.standard gen1)
   let alpha = 0.1 -- from kuckelbier et al
   let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
   let tau = 1.0
   let epsilon = 1e-16
-  q <- known $ QDist 1 (V.replicate 2 0) 1 qDist prior stdNormal (rho alpha eta tau epsilon)
+  q <- known $ (N (Node 1 (V.replicate 2 0) 1 qDist prior (rho alpha eta tau epsilon)))
   -- qNormalProp 1.0 gen1 nSamp xs q
-  qNormalPropAD 1.0 gen1 nSamp xs q
-  q' <- fromMaybe (error "impos") <$> content q
+  qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
+  (N q') <- fromMaybe (error "impos") <$> content q
   return (dist q', time q', Samp.mean xs)
 
 someFunc :: IO ()
