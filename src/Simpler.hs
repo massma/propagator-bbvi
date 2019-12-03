@@ -8,10 +8,11 @@ import Data.Propagator
 import Control.Monad.ST
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
+import Numeric.MathFunctions.Constants (m_sqrt_2_pi)
 import Numeric.SpecFunctions (logGamma, digamma)
 import System.Random.MWC (create, uniform, initialize, GenST, uniformR)
-import Statistics.Distribution
-import Statistics.Distribution.Normal
+-- import Statistics.Distribution
+-- import Statistics.Distribution.Normal
 import qualified System.Random.MWC.Distributions as MWCD
 import qualified Statistics.Sample as Samp
 
@@ -138,23 +139,34 @@ instance (VecParam a, VariLogic a b) => Propagated (PropNode a b) where
   merge (U _) _ = Contradiction mempty "Trying to update a gradient"
   merge (N _) (N _) = Contradiction mempty "Trying overwrite a node"
 
-instance VecParam NormalDistribution where
-  paramVector d = V.fromList [mean d, stdDev d]
-  fromParamVector v = normalDistr (v V.! 0) ((v V.! 1))
+newtype NormalDist = ND (V.Vector Double) deriving (Show, Eq, Ord, Read)
+
+mean (ND xs) = xs V.! 0
+stdDev (ND xs) = xs V.! 1
+normalDistr mu std = ND (V.fromList [mu, std])
+
+instance VecParam NormalDist where
+  paramVector (ND v) = v
+  fromParamVector v = ND v
   nParams _d = 2
 
-instance Dist NormalDistribution SampleDouble where
+instance Dist NormalDist SampleDouble where
   transform d epsilon = mean d + stdDev d * epsilon
   resample _d gen = MWCD.standard gen
 
-instance VariLogic NormalDistribution SampleDouble where
-  logProb d x= logDensity d x
+instance VariLogic NormalDist SampleDouble where
+  logProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
+    where
+      xm = x - mean d
+      sd = stdDev d
+      ndPdfDenom = log $ m_sqrt_2_pi * sd
+
   paramGradOfLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
     where
       mu = mean d
       std = stdDev d
 
-instance Differentiable NormalDistribution SampleDouble where
+instance Differentiable NormalDist SampleDouble where
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
   gradTransform _d epsilon = V.fromList [1.0 , epsilon]
 
@@ -324,7 +336,7 @@ normalFit xs =
             (fromIntegral nSamp)
             qDist
             prior
-            (rho alpha eta tau epsilon)) :: PropNode NormalDistribution Double)
+            (rho alpha eta tau epsilon)) :: PropNode NormalDist Double)
     xProp <-
       known $
       (N (Node 1 (V.empty) 0 xDist (O V.empty) (\_x1 _x2 -> (V.empty, V.empty))) :: PropNode Obs Double)
@@ -337,12 +349,54 @@ normalFit xs =
 
 genNormal = do
   gen <- create
-  xs <- V.replicateM 1000 (genContinuous (normalDistr 5.0 3.0) gen)
+  xs <- V.replicateM 1000 (transform (normalDistr 5.0 3.0) <$> resample (normalDistr 5.0 3.0) gen)
   return xs
+
+genMixture = do
+  gen <- create
+  let theta' = MWCD.categorical (V.fromList [5.0, 10.0]) gen
+  let std = 1.0
+  let mixtures =
+        V.fromList
+          [MWCD.normal 2.0 std gen :: IO Double, MWCD.normal (-2.0) std gen]
+  xs <- V.replicateM 1000 ((mixtures V.!) =<< theta')
+  return xs
+
+-- mixtureFit xs =
+--   runST $ do
+--     genG <- create
+--     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+--     let priorTheta = Diri (V.fromList [1.0, 1.0])
+--     let priorBeta = V.fromList [normalDistr 0.0 1.0, normalDistr 0.0 1.0]
+--     let nSamp = 100
+--     let qDist = normalDistr 0.0 2.0
+--     let alpha = 0.1 -- from kuckelbier et al
+--     let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+--     let tau = 1.0
+--     let epsilon = 1e-16 -- (fromIntegral $ V.length xs)
+--     let xDist = (O xs)
+--     q <-
+--       known $
+--       (N (Node
+--             1
+--             (V.replicate 2 0)
+--             (fromIntegral nSamp)
+--             qDist
+--             prior
+--             (rho alpha eta tau epsilon)) :: PropNode NormalDist Double)
+--     xProp <-
+--       known $
+--       (N (Node 1 (V.empty) 0 xDist (O V.empty) (\_x1 _x2 -> (V.empty, V.empty))) :: PropNode Obs Double)
+--   -- qNormalProp 1.0 gen1 nSamp xs q
+--   -- qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
+--     qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
+--     (N q') <- fromMaybe (error "impos") <$> content q
+--     (N xs') <- fromMaybe (error "impos") <$> content xProp
+--     return (dist q', time q', Samp.mean xs, time xs')
 
 someFunc :: IO ()
 someFunc = do
-  xs <- genNormal
+  let xs = runST $ genNormal
   putStrLn (show $ normalFit xs)
 -- >>> someFunc
 --
