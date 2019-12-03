@@ -13,30 +13,36 @@ import Statistics.Distribution.Normal
 import qualified System.Random.MWC.Distributions as MWCD
 import qualified Statistics.Sample as Samp
 
+type RandomVector = V.Vector Double
+
+type RandomDouble = Double
+
+data Random = V RandomVector | D RandomDouble
+
+fromRD (D x) = x
+
 class VariationalLogic a where
-  logProb :: a -> Double -> Double
+  logProb :: a -> Random -> Double
   paramVector :: a -> V.Vector Double
   fromParamVector :: V.Vector Double -> a
-  gradNuLogQ :: a -> Double -> V.Vector Double -- nu are parameters to variational family
+  gradNuLogQ :: a -> Random -> V.Vector Double -- nu are parameters to variational family
   nParams :: a -> Int
-  transform :: a -> Double -> Double
+  transform :: a -> Random -> Random
   -- inv transform?
-  resample :: a -> GenST s -> ST s Double
+  resample :: a -> GenST s -> ST s Random
 
 class VariationalLogic a => Differentiable a where
-  gradNuTransform :: a -> Double -> V.Vector Double
-  gradZQ :: a -> Double -> Double
+  gradNuTransform :: a -> Random -> V.Vector Double
+  gradZQ :: a -> Random -> Double
 
 type Time = Int
 
 maxStep :: Time
 maxStep = 100000 -- 4664 -- 100000
--- | time can only increase in increments of 1. syntax is to write t
--- to 1, b/c that way an empty t starts at 1
 
 type Memory = V.Vector Double
 
-type Sample = V.Vector Double
+type Sample = V.Vector Random
 
 type Likelihood = V.Vector Double
 
@@ -72,7 +78,7 @@ instance VariationalLogic Obs where
   nParams _d = 0
   transform _d eps = eps
   resample (O d) gen =
-    return . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
+    return . D . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
 
 instance Differentiable Obs where
   gradNuTransform _d _x = V.empty
@@ -97,20 +103,20 @@ instance VariationalLogic a => Propagated (PropNode a) where
   merge (N _) (N _) = Contradiction mempty "Trying overwrite a node"
 
 instance VariationalLogic NormalDistribution where
-  logProb = logDensity
+  logProb d (D x)= logDensity d x
   paramVector d = V.fromList [mean d, stdDev d]
   fromParamVector v = normalDistr (v V.! 0) ((v V.! 1))
   nParams _d = 2
-  gradNuLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
+  gradNuLogQ d (D x) = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
     where
       mu = mean d
       std = stdDev d
-  transform d epsilon = mean d + stdDev d * epsilon
-  resample _d gen = MWCD.standard gen
+  transform d (D epsilon) = D $ mean d + stdDev d * epsilon
+  resample _d gen = D <$> MWCD.standard gen
 
 instance Differentiable NormalDistribution where
-  gradZQ d z = -(z - mean d)/(stdDev d ** 2)
-  gradNuTransform _d epsilon = V.fromList [1.0 , epsilon]
+  gradZQ d (D z) = -(z - mean d)/(stdDev d ** 2)
+  gradNuTransform _d (D epsilon) = V.fromList [1.0 , epsilon]
 
 gradient :: VariationalLogic a => Node a -> (Weight, V.Vector Double, Sample) -> PropNode a
 gradient q@(Node{..}) (nFactors, like, samples) =
@@ -204,7 +210,7 @@ normalLike nSamp std gen xs q =
       ( fromIntegral $ V.length xs
       , V.map
           (\eps ->
-             V.sum $ V.map (logDensity (normalDistr (transform q eps) std)) xs)
+             V.sum $ V.map (logDensity (normalDistr (fromRD $ transform q eps) std)) xs)
           samples
       , samples)
 
@@ -215,7 +221,7 @@ normalLike2 nSamp nObs std gen (xs, q) = do
     ( fromIntegral nObs
     , V.map
         (\eps ->
-           V.sum $ V.map (logDensity (normalDistr (transform q eps) std)) obs)
+           V.sum $ V.map (logDensity (normalDistr (fromRD $ transform q eps) std) . fromRD) obs)
         samples
     , (V.empty, samples))
 
@@ -229,7 +235,7 @@ normalLikeAD nSamp std gen xs q =
       , V.map
           (\eps ->
              V.sum $
-             V.map ((V.! 0) . gradNuLogQ (normalDistr (transform q eps) std)) xs)
+             V.map ((V.! 0) . gradNuLogQ (normalDistr (fromRD $ transform q eps) std)) xs)
           samples
       , samples)
 
@@ -245,12 +251,12 @@ normalLikeAD2 nSamp nObs std gen (xs, q) = do
           (\eps ->
              V.sum $
              V.map
-               ((V.! 0) . gradNuLogQ (normalDistr (transform q eps) std))
+               ((V.! 0) . gradNuLogQ (normalDistr (fromRD $ transform q eps) std))
                obs)
           samples
       , samples))
 
-propagator xs = runST $ do
+normalFit xs = runST $ do
   genG <- create
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
   let prior = normalDistr 0.0 2.0
@@ -268,12 +274,16 @@ propagator xs = runST $ do
   qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
   (N q') <- fromMaybe (error "impos") <$> content q
   (N xs') <- fromMaybe (error "impos") <$> content xProp
-  return (dist q', time q', Samp.mean xs, time xs', V.length . fromO . dist $ xs')
+  return (dist q', time q', Samp.mean xs, time xs')
+
+genNormal = do
+  gen <- create
+  xs <- V.replicateM 1000 (genContinuous (normalDistr 5.0 3.0) gen)
+  return xs
 
 someFunc :: IO ()
 someFunc = do
-  gen <- create
-  xs <- V.replicateM 1000 (genContinuous (normalDistr 5.0 3.0) gen)
-  putStrLn (show $ propagator xs)
+  xs <- genNormal
+  putStrLn (show $ normalFit xs)
 -- >>> someFunc
 --
