@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 module Simpler
   ( someFunc
   ) where
@@ -14,27 +15,34 @@ import Statistics.Distribution.Normal
 import qualified System.Random.MWC.Distributions as MWCD
 import qualified Statistics.Sample as Samp
 
-type RandomVector = V.Vector Double
+-- from HMM:
+-- splash belief propagation (BP)
+type SampleVector = V.Vector Double
 
-type RandomDouble = Double
+type SampleDouble = Double
 
-data Random = V RandomVector | D RandomDouble
+-- data Sample = V SampleVector | D SampleDouble
 
-fromRD (D x) = x
+-- fromRD (D x) = x
 
-class VariationalLogic a where
-  logProb :: a -> Random -> Double
+class Dist a b where
+  -- | transform <$> resample = true sample from dist
+  transform :: a -> b -> b
+  -- inv transform?
+  resample :: a -> GenST s -> ST s b
+
+class VecParam a where
   paramVector :: a -> V.Vector Double
   fromParamVector :: V.Vector Double -> a
-  paramGradOfLogQ :: a -> Random -> V.Vector Double -- gradient of parameters evauated at some sample of x
   nParams :: a -> Int
-  transform :: a -> Random -> Random
-  -- inv transform?
-  resample :: a -> GenST s -> ST s Random
 
-class VariationalLogic a => Differentiable a where
-  gradTransform :: a -> Random -> V.Vector Double
-  sampleGradOfLogQ :: a -> Random -> Double -- gradient of a sample evaluate with params of q
+class (VecParam a, Dist a b) => VariLogic a b where
+  logProb :: a -> b -> Double
+  paramGradOfLogQ :: a -> b -> V.Vector Double -- gradient of parameters evauated at some sample of x
+
+class VariLogic a b => Differentiable a b where
+  gradTransform :: a -> b -> V.Vector Double
+  sampleGradOfLogQ :: a -> b -> Double -- gradient of a sample evaluate with params of q
 
 type Time = Int
 
@@ -43,7 +51,7 @@ maxStep = 100000 -- 4664 -- 100000
 
 type Memory = V.Vector Double
 
-type Sample = V.Vector Random
+type Samples = V.Vector
 
 type Likelihood = V.Vector Double
 
@@ -53,7 +61,7 @@ type Gradient = V.Vector Double
 
 type GradUpdate = (Memory, Gradient)
 
-data PropNode a = N (Node a) | U GradUpdate
+data PropNode a b = N (Node a) | U GradUpdate
 
 data Node a = Node
   { time :: !Time
@@ -71,17 +79,21 @@ newtype Obs = O (V.Vector Double) deriving (Show, Eq, Ord, Read)
 
 fromO (O v) = v
 
-instance VariationalLogic Obs where
-  logProb _d _x = 0.0
-  paramVector (O d) = d
-  fromParamVector v = (O v)
-  paramGradOfLogQ _d _x = V.empty
-  nParams _d = 0
+instance Dist Obs Double where
   transform _d eps = eps
   resample (O d) gen =
-    return . D . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
+    return . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
 
-instance Differentiable Obs where
+instance VecParam Obs where
+  paramVector (O d) = d
+  fromParamVector v = (O v)
+  nParams _d = 0
+
+instance VariLogic Obs Double where
+  logProb _d _x = 0.0
+  paramGradOfLogQ _d _x = V.empty
+
+instance Differentiable Obs Double where
   gradTransform _d _x = V.empty
   sampleGradOfLogQ _d _x = 0.0
 
@@ -90,22 +102,25 @@ newtype Dirichlet = Diri (V.Vector Double) deriving (Show, Eq, Ord, Read)
 logB :: Dirichlet -> Double
 logB (Diri alphas) = V.sum (V.map logGamma alphas) - logGamma (V.sum alphas)
 
-instance VariationalLogic Dirichlet where
-  logProb (Diri diri) (V cat) =
-    V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) diri cat) -
-    logB (Diri diri)
+instance Dist Dirichlet SampleVector where
+  transform _d x = x
+  resample (Diri diri) gen = MWCD.dirichlet diri gen
+
+instance VecParam Dirichlet where
   paramVector (Diri diri) = diri
   fromParamVector = Diri
-  paramGradOfLogQ (Diri diri) (V cat) =
+  nParams (Diri diri) = V.length diri
+
+instance VariLogic Dirichlet SampleVector where
+  logProb (Diri diri) cat =
+    V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) diri cat) -
+    logB (Diri diri)
+  paramGradOfLogQ (Diri diri) cat =
     V.zipWith (\a x -> summed - digamma a + a * log x) diri cat
     where
       summed = digamma (V.sum cat)
-  nParams (Diri diri) = V.length diri
-  transform _d x = x
-  resample (Diri diri) gen = V <$> MWCD.dirichlet diri gen
 
-
-instance VariationalLogic a => Propagated (PropNode a) where
+instance (VecParam a, VariLogic a b) => Propagated (PropNode a b) where
   merge (N node) (U (deltaM, g))
     | norm g < 0.00001 = Change False (N node) -- 0.00001
     | time node >= maxStep = Change False (N node)
@@ -123,23 +138,31 @@ instance VariationalLogic a => Propagated (PropNode a) where
   merge (U _) _ = Contradiction mempty "Trying to update a gradient"
   merge (N _) (N _) = Contradiction mempty "Trying overwrite a node"
 
-instance VariationalLogic NormalDistribution where
-  logProb d (D x)= logDensity d x
+instance VecParam NormalDistribution where
   paramVector d = V.fromList [mean d, stdDev d]
   fromParamVector v = normalDistr (v V.! 0) ((v V.! 1))
   nParams _d = 2
-  paramGradOfLogQ d (D x) = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
+
+instance Dist NormalDistribution SampleDouble where
+  transform d epsilon = mean d + stdDev d * epsilon
+  resample _d gen = MWCD.standard gen
+
+instance VariLogic NormalDistribution SampleDouble where
+  logProb d x= logDensity d x
+  paramGradOfLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
     where
       mu = mean d
       std = stdDev d
-  transform d (D epsilon) = D $ mean d + stdDev d * epsilon
-  resample _d gen = D <$> MWCD.standard gen
 
-instance Differentiable NormalDistribution where
-  sampleGradOfLogQ d (D z) = -(z - mean d)/(stdDev d ** 2)
-  gradTransform _d (D epsilon) = V.fromList [1.0 , epsilon]
+instance Differentiable NormalDistribution SampleDouble where
+  sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
+  gradTransform _d epsilon = V.fromList [1.0 , epsilon]
 
-gradient :: VariationalLogic a => Node a -> (Weight, V.Vector Double, Sample) -> PropNode a
+gradient ::
+     (VecParam a, VariLogic a b)
+  => Node a
+  -> (Weight, V.Vector Double, Samples b)
+  -> PropNode a b
 gradient q@(Node{..}) (nFactors, like, samples) =
   U (memory', V.zipWith (*) rho' grad)
   where
@@ -153,7 +176,11 @@ gradient q@(Node{..}) (nFactors, like, samples) =
     (memory', rho') = rhoF grad q
 
 -- | TODO: speed up by calc length in one pass
-gradientAD :: Differentiable a => Node a -> (Weight, V.Vector Double, Sample) -> PropNode a
+gradientAD ::
+     Differentiable a b
+  => Node a
+  -> (Weight, V.Vector Double, Samples b)
+  -> PropNode a b
 gradientAD q@(Node {..}) (nFactors, like, samples) =
   U (deltaMem, V.zipWith (*) rho' grad)
   where
@@ -186,25 +213,25 @@ rho alpha eta tau epsilon grad Node{..} =
 -- implement weight on each propgator, and then divide by each
 -- variationa distributions' factor (I was doing this wrong).
 qProp ::
-     VariationalLogic a
-  => (a -> ST s (Weight, V.Vector Double, Sample))
-  -> Cell s (PropNode a)
+     (VecParam a, VariLogic a b)
+  => (a -> ST s (Weight, V.Vector Double, Samples b))
+  -> Cell s (PropNode a b)
   -> ST s ()
 qProp likeFunc q =
   watch q $ \(N q') -> write q =<< (gradient q' <$> likeFunc (dist q'))
 
 qPropAD ::
-     Differentiable a
-  => (a -> ST s (Weight, V.Vector Double, Sample))
-  -> Cell s (PropNode a)
+     (Differentiable a b)
+  => (a -> ST s (Weight, V.Vector Double, Samples b))
+  -> Cell s (PropNode a b)
   -> ST s ()
 qPropAD likeFunc q =
   watch q $ \(N q') -> write q =<< (gradientAD q' <$> likeFunc (dist q'))
 
 qProp2 ::
-     (VariationalLogic a, VariationalLogic b)
-  => ((a, b) -> ST s (Weight, V.Vector Double, (Sample, Sample)))
-  -> (Cell s (PropNode a), Cell s (PropNode b))
+     (VariLogic a c, VariLogic b d)
+  => ((a, b) -> ST s (Weight, V.Vector Double, (Samples c, Samples d)))
+  -> (Cell s (PropNode a c), Cell s (PropNode b d))
   -> ST s ()
 qProp2 likeFunc (q1, q2) =
   watch q1 $ \(N q1') ->
@@ -214,9 +241,9 @@ qProp2 likeFunc (q1, q2) =
       write q2 (gradient q2' (w, l, s2))
 
 qPropAD2 ::
-     (Differentiable a, Differentiable b)
-  => ((a, b) -> ST s ((Weight, V.Vector Double, Sample), (Weight, V.Vector Double, Sample)))
-  -> (Cell s (PropNode a), Cell s (PropNode b))
+     (Differentiable a c, Differentiable b d)
+  => ((a, b) -> ST s ((Weight, V.Vector Double, Samples c), (Weight, V.Vector Double, Samples d)))
+  -> (Cell s (PropNode a c), Cell s (PropNode b d))
   -> ST s ()
 qPropAD2 likeFunc (q1, q2) =
   watch q1 $ \(N q1') ->
@@ -231,20 +258,20 @@ normalLike nSamp std gen xs q =
       ( fromIntegral $ V.length xs
       , V.map
           (\eps ->
-             V.sum $ V.map (logDensity (normalDistr (fromRD $ transform q eps) std)) xs)
+             V.sum $ V.map (logProb (normalDistr (transform q eps) std)) xs)
           samples
       , samples)
 
-normalLike2 nSamp nObs std gen (xs, q) = do
-  samples <- V.replicateM nSamp (resample q gen)
-  obs <- V.replicateM nSamp (resample xs gen)
-  return
-    ( fromIntegral nObs
-    , V.map
-        (\eps ->
-           V.sum $ V.map (logDensity (normalDistr (fromRD $ transform q eps) std) . fromRD) obs)
-        samples
-    , (V.empty, samples))
+-- normalLike2 nSamp nObs std gen (xs, q) = do
+--   samples <- V.replicateM nSamp (resample q gen)
+--   obs <- V.replicateM nSamp (resample xs gen)
+--   return
+--     ( fromIntegral nObs
+--     , V.map
+--         (\eps ->
+--            V.sum $ V.map (logProb (normalDistr (transform q eps) std) . fromRD) obs)
+--         samples
+--     , (V.empty, samples))
 
 -- | specialize all fmaps to vector???
 -- CAREFUL: with rao-blackweixation and my wieghting approach, all terms
@@ -256,7 +283,7 @@ normalLikeAD nSamp std gen xs q =
       , V.map
           (\eps ->
              V.sum $
-             V.map ((V.! 0) . paramGradOfLogQ (normalDistr (fromRD $ transform q eps) std)) xs)
+             V.map ((V.! 0) . paramGradOfLogQ (normalDistr (transform q eps) std)) xs)
           samples
       , samples)
 
@@ -272,30 +299,41 @@ normalLikeAD2 nSamp nObs std gen (xs, q) = do
           (\eps ->
              V.sum $
              V.map
-               ((V.! 0) . paramGradOfLogQ (normalDistr (fromRD $ transform q eps) std))
-               obs)
+               ((V.! 0) . paramGradOfLogQ (normalDistr (transform q eps) std))
+               (obs :: V.Vector Double))
           samples
       , samples))
 
-normalFit xs = runST $ do
-  genG <- create
-  gen1 <- initialize =<< V.replicateM 256 (uniform genG)
-  let prior = normalDistr 0.0 2.0
-  let nSamp = 100
-  let qDist = normalDistr 0.0 2.0
-  let alpha = 0.1 -- from kuckelbier et al
-  let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
-  let tau = 1.0
-  let epsilon = 1e-16 -- (fromIntegral $ V.length xs)
-  let xDist = (O xs)
-  q <- known $ N (Node 1 (V.replicate 2 0) (fromIntegral nSamp) qDist prior (rho alpha eta tau epsilon))
-  xProp <- known $ N (Node 1 (V.empty) 0 xDist (O V.empty)  (\_x1 _x2 -> (V.empty, V.empty)))
+normalFit xs =
+  runST $ do
+    genG <- create
+    gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+    let prior = normalDistr 0.0 2.0
+    let nSamp = 100
+    let qDist = normalDistr 0.0 2.0
+    let alpha = 0.1 -- from kuckelbier et al
+    let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    let tau = 1.0
+    let epsilon = 1e-16 -- (fromIntegral $ V.length xs)
+    let xDist = (O xs)
+    q <-
+      known $
+      (N (Node
+            1
+            (V.replicate 2 0)
+            (fromIntegral nSamp)
+            qDist
+            prior
+            (rho alpha eta tau epsilon)) :: PropNode NormalDistribution Double)
+    xProp <-
+      known $
+      (N (Node 1 (V.empty) 0 xDist (O V.empty) (\_x1 _x2 -> (V.empty, V.empty))) :: PropNode Obs Double)
   -- qNormalProp 1.0 gen1 nSamp xs q
   -- qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
-  qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
-  (N q') <- fromMaybe (error "impos") <$> content q
-  (N xs') <- fromMaybe (error "impos") <$> content xProp
-  return (dist q', time q', Samp.mean xs, time xs')
+    qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
+    (N q') <- fromMaybe (error "impos") <$> content q
+    (N xs') <- fromMaybe (error "impos") <$> content xProp
+    return (dist q', time q', Samp.mean xs, time xs')
 
 genNormal = do
   gen <- create
