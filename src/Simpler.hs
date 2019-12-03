@@ -8,6 +8,7 @@ import Data.Propagator
 import Control.Monad.ST
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
+import Numeric.AD (grad, auto)
 import Numeric.MathFunctions.Constants (m_sqrt_2_pi)
 import Numeric.SpecFunctions (logGamma, digamma)
 import System.Random.MWC (create, uniform, initialize, GenST, uniformR)
@@ -26,24 +27,27 @@ type SampleDouble = Double
 
 -- fromRD (D x) = x
 
-class Dist a b where
+class Functor a => Dist a b where
   -- | transform <$> resample = true sample from dist
-  transform :: a -> b -> b
+  transform :: a Double -> b -> b
   -- inv transform?
-  resample :: a -> GenST s -> ST s b
+  resample :: a Double -> GenST s -> ST s b
 
-class VecParam a where
-  paramVector :: a -> V.Vector Double
-  fromParamVector :: V.Vector Double -> a
-  nParams :: a -> Int
+class (Functor a) => VariUtil a where
+  zipDist :: (Double -> Double -> Double) -> a Double -> a Double -> a Double
+  norm :: a Double -> Double
 
-class (VecParam a, Dist a b) => VariLogic a b where
-  logProb :: a -> b -> Double
-  paramGradOfLogQ :: a -> b -> V.Vector Double -- gradient of parameters evauated at some sample of x
+class (VariUtil a, Dist a b) => VariLogic a b where
+  logProb :: a Double -> b -> Double
+  paramGradOfLogQ :: a Double -> b -> a Double -- gradient of parameters evauated at some sample of x
 
 class VariLogic a b => Differentiable a b where
-  gradTransform :: a -> b -> V.Vector Double
-  sampleGradOfLogQ :: a -> b -> Double -- gradient of a sample evaluate with params of q
+  gradTransform :: a Double -> b -> a Double
+  sampleGradOfLogQ :: a Double -> b -> Double -- gradient of a sample evaluate with params of q
+
+instance VariUtil V.Vector where
+  zipDist = V.zipWith
+  norm = sqrt . V.sum . V.map (^ (2 :: Int))
 
 type Time = Int
 
@@ -60,23 +64,18 @@ type Weight = Double
 
 type Gradient = V.Vector Double
 
-type GradUpdate = (Memory, Gradient)
-
-data PropNode a b = N (Node a) | U GradUpdate
+data PropNode a b = N (Node a) | U (a Double, a Double) -- memory, gradient
 
 data Node a = Node
   { time :: !Time
-  , memory :: !Memory
+  , memory :: !(a Double)
   , weight :: !Weight
-  , dist :: !a
-  , prior :: !a
-  , rhoF :: !(V.Vector Double -> Node a -> (Memory, V.Vector Double))
+  , dist :: !(a Double)
+  , prior :: !(a Double)
+  , rhoF :: !(a Double -> Node a -> (a Double, a Double)) -- memory, gradient
   }
 
-norm :: V.Vector Double -> Double
-norm = sqrt . V.sum . V.map (^ (2 :: Int))
-
-newtype Obs = O (V.Vector Double) deriving (Show, Eq, Ord, Read)
+newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
 
 fromO (O v) = v
 
@@ -85,43 +84,47 @@ instance Dist Obs Double where
   resample (O d) gen =
     return . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
 
-instance VecParam Obs where
-  paramVector (O d) = d
-  fromParamVector v = (O v)
-  nParams _d = 0
+instance Functor Obs where
+  fmap _f _o = O V.empty -- WARNING: does not satisfy functor laws
+
+instance VariUtil Obs where
+  zipDist _f _o1 _o2 = O V.empty
+  norm _ = 0.0
 
 instance VariLogic Obs Double where
   logProb _d _x = 0.0
-  paramGradOfLogQ _d _x = V.empty
+  paramGradOfLogQ _d _x = O V.empty
 
 instance Differentiable Obs Double where
-  gradTransform _d _x = V.empty
+  gradTransform _d _x = O V.empty
   sampleGradOfLogQ _d _x = 0.0
 
-newtype Dirichlet = Diri (V.Vector Double) deriving (Show, Eq, Ord, Read)
+newtype Dirichlet a = Diri (V.Vector a) deriving (Show, Eq, Ord, Read)
 
-logB :: Dirichlet -> Double
+logB :: Dirichlet Double -> Double
 logB (Diri alphas) = V.sum (V.map logGamma alphas) - logGamma (V.sum alphas)
 
 instance Dist Dirichlet SampleVector where
   transform _d x = x
   resample (Diri diri) gen = MWCD.dirichlet diri gen
 
-instance VecParam Dirichlet where
-  paramVector (Diri diri) = diri
-  fromParamVector = Diri
-  nParams (Diri diri) = V.length diri
+instance Functor Dirichlet where
+  fmap f (Diri diri) = Diri $ V.map f diri
+
+instance VariUtil Dirichlet where
+  zipDist f (Diri x1) (Diri x2) = Diri $ V.zipWith f x1 x2
+  norm (Diri x1) = norm x1
 
 instance VariLogic Dirichlet SampleVector where
   logProb (Diri diri) cat =
     V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) diri cat) -
     logB (Diri diri)
   paramGradOfLogQ (Diri diri) cat =
-    V.zipWith (\a x -> summed - digamma a + a * log x) diri cat
+    Diri $ V.zipWith (\a x -> summed - digamma a + a * log x) diri cat
     where
       summed = digamma (V.sum cat)
 
-instance (VecParam a, VariLogic a b) => Propagated (PropNode a b) where
+instance VariLogic a b => Propagated (PropNode (a) b) where
   merge (N node) (U (deltaM, g))
     | norm g < 0.00001 = Change False (N node) -- 0.00001
     | time node >= maxStep = Change False (N node)
@@ -131,28 +134,30 @@ instance (VecParam a, VariLogic a b) => Propagated (PropNode a b) where
         N
           (node
              { time = (time node) + 1
-             , memory = V.zipWith (+) (memory node) deltaM
+             , memory = zipDist (+) (memory node) deltaM
              , dist = newQ
              })
         where
-          newQ = fromParamVector $ V.zipWith (+) (paramVector (dist node)) g
+          newQ = zipDist (+) (dist node) g
   merge (U _) _ = Contradiction mempty "Trying to update a gradient"
   merge (N _) (N _) = Contradiction mempty "Trying overwrite a node"
 
-newtype NormalDist = ND (V.Vector Double) deriving (Show, Eq, Ord, Read)
+newtype NormalDist a = ND (V.Vector a) deriving (Show, Eq, Ord, Read)
 
 mean (ND xs) = xs V.! 0
 stdDev (ND xs) = xs V.! 1
 normalDistr mu std = ND (V.fromList [mu, std])
 
-instance VecParam NormalDist where
-  paramVector (ND v) = v
-  fromParamVector v = ND v
-  nParams _d = 2
+instance Functor NormalDist where
+  fmap f (ND v) = ND $ V.map f v
 
 instance Dist NormalDist SampleDouble where
   transform d epsilon = mean d + stdDev d * epsilon
   resample _d gen = MWCD.standard gen
+
+instance VariUtil NormalDist where
+  zipDist f (ND x1) (ND x2) = ND $ V.zipWith f x1 x2
+  norm (ND x) = norm x
 
 instance VariLogic NormalDist SampleDouble where
   logProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
@@ -161,108 +166,108 @@ instance VariLogic NormalDist SampleDouble where
       sd = stdDev d
       ndPdfDenom = log $ m_sqrt_2_pi * sd
 
-  paramGradOfLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
+  paramGradOfLogQ d x = ND $ V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
     where
       mu = mean d
       std = stdDev d
 
 instance Differentiable NormalDist SampleDouble where
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
-  gradTransform _d epsilon = V.fromList [1.0 , epsilon]
+  gradTransform _d epsilon = ND $ V.fromList [1.0 , epsilon] -- grad (\d' -> transform d' (auto epsilon)) d -- ND $ V.fromList [1.0 , epsilon] --
 
-gradient ::
-     (VecParam a, VariLogic a b)
-  => Node a
+gradientScore ::
+     VariLogic a b
+  => Node (a)
   -> (Weight, V.Vector Double, Samples b)
-  -> PropNode a b
-gradient q@(Node{..}) (nFactors, like, samples) =
-  U (memory', V.zipWith (*) rho' grad)
+  -> PropNode (a) b
+gradientScore = gradient f
+  where
+    f Node {..} nFactors s l =
+      fmap
+        (* (l + nFactors / weight * (logProb prior s - logProb dist s)))
+        (paramGradOfLogQ dist s)
+
+gradient f q@(Node{..}) (nFactors, like, samples) =
+  U (memory', zipDist (*) rho' grad)
   where
     summed =
-      V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
+      V.foldl' (zipDist (+)) (fmap (const 0.0) dist) $
       V.zipWith
-        (\s l -> V.map (* (l + nFactors / weight * (logProb prior s - logProb dist s))) (paramGradOfLogQ dist s))
+        (f q nFactors)
         samples
         like
-    grad = V.map (/ (fromIntegral $ V.length summed)) summed
+    grad = fmap (/ (fromIntegral $ V.length samples)) summed
     (memory', rho') = rhoF grad q
 
 -- | TODO: speed up by calc length in one pass
-gradientAD ::
+gradientReparam ::
      Differentiable a b
-  => Node a
+  => Node (a)
   -> (Weight, V.Vector Double, Samples b)
-  -> PropNode a b
-gradientAD q@(Node {..}) (nFactors, like, samples) =
-  U (deltaMem, V.zipWith (*) rho' grad)
+  -> PropNode (a) b
+gradientReparam = gradient f
   where
-    summed =
-      V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
-      V.zipWith
-        (\s l ->
-           V.map
-             (* (l +
-                 nFactors / weight *
-                 (sampleGradOfLogQ prior (transform dist s) -
-                  sampleGradOfLogQ dist (transform dist s))))
-             (gradTransform dist s))
-        samples
-        like
-    grad = V.map (/ (fromIntegral $ V.length summed)) summed
-    (deltaMem, rho') = rhoF grad q
+    f Node {..} nFactors s l =
+      fmap
+        (* (l +
+            nFactors / weight *
+            (sampleGradOfLogQ prior (transform dist s) -
+             sampleGradOfLogQ dist (transform dist s))))
+        (gradTransform dist s)
+
 
 rho alpha eta tau epsilon grad Node{..} =
   ( deltaM
-  , V.zipWith
+  , zipDist
       (\ds s ->
          eta * (fromIntegral time) ** (negate 0.5 + epsilon) *
          (1.0 / (tau + sqrt (s + ds))))
       deltaM memory)
   where
-    deltaM = V.zipWith (\g s -> alpha * g ^ (2 :: Int) - alpha * s) grad memory
+    deltaM = zipDist (\g s -> alpha * g ^ (2 :: Int) - alpha * s) grad memory
 
 -- | TODO: try making obs a Node and see if it still performant
 -- implement weight on each propgator, and then divide by each
 -- variationa distributions' factor (I was doing this wrong).
 qProp ::
-     (VecParam a, VariLogic a b)
-  => (a -> ST s (Weight, V.Vector Double, Samples b))
-  -> Cell s (PropNode a b)
+     VariLogic a b
+  => ((a Double) -> ST s (Weight, V.Vector Double, Samples b))
+  -> Cell s (PropNode (a) b)
   -> ST s ()
 qProp likeFunc q =
-  watch q $ \(N q') -> write q =<< (gradient q' <$> likeFunc (dist q'))
+  watch q $ \(N q') -> write q =<< (gradientScore q' <$> likeFunc (dist q'))
 
 qPropAD ::
      (Differentiable a b)
-  => (a -> ST s (Weight, V.Vector Double, Samples b))
-  -> Cell s (PropNode a b)
+  => ((a Double) -> ST s (Weight, V.Vector Double, Samples b))
+  -> Cell s (PropNode (a) b)
   -> ST s ()
 qPropAD likeFunc q =
-  watch q $ \(N q') -> write q =<< (gradientAD q' <$> likeFunc (dist q'))
+  watch q $ \(N q') -> write q =<< (gradientReparam q' <$> likeFunc (dist q'))
 
 qProp2 ::
      (VariLogic a c, VariLogic b d)
-  => ((a, b) -> ST s (Weight, V.Vector Double, (Samples c, Samples d)))
-  -> (Cell s (PropNode a c), Cell s (PropNode b d))
+  => ((a Double, b Double) -> ST s (Weight, V.Vector Double, (Samples c, Samples d)))
+  -> (Cell s (PropNode (a) c), Cell s (PropNode (b) d))
   -> ST s ()
 qProp2 likeFunc (q1, q2) =
   watch q1 $ \(N q1') ->
     watch q2 $ \(N q2') -> do
       (w, l, (s1, s2)) <- likeFunc (dist q1', dist q2')
-      write q1 (gradient q1' (w, l, s1))
-      write q2 (gradient q2' (w, l, s2))
+      write q1 (gradientScore q1' (w, l, s1))
+      write q2 (gradientScore q2' (w, l, s2))
 
 qPropAD2 ::
      (Differentiable a c, Differentiable b d)
-  => ((a, b) -> ST s ((Weight, V.Vector Double, Samples c), (Weight, V.Vector Double, Samples d)))
-  -> (Cell s (PropNode a c), Cell s (PropNode b d))
+  => (((a Double), (b Double)) -> ST s ((Weight, V.Vector Double, Samples c), (Weight, V.Vector Double, Samples d)))
+  -> (Cell s (PropNode (a) c), Cell s (PropNode (b) d))
   -> ST s ()
 qPropAD2 likeFunc (q1, q2) =
   watch q1 $ \(N q1') ->
     watch q2 $ \(N q2') -> do
       (l1, l2) <- likeFunc (dist q1', dist q2')
-      write q1 (gradientAD q1' l1)
-      write q2 (gradientAD q2' l2)
+      write q1 (gradientReparam q1' l1)
+      write q2 (gradientReparam q2' l2)
 
 normalLike nSamp std gen xs q =
   V.replicateM nSamp (resample q gen) >>= \samples ->
@@ -295,7 +300,7 @@ normalLikeAD nSamp std gen xs q =
       , V.map
           (\eps ->
              V.sum $
-             V.map ((V.! 0) . paramGradOfLogQ (normalDistr (transform q eps) std)) xs)
+             V.map (mean . paramGradOfLogQ (normalDistr (transform q eps) std)) xs)
           samples
       , samples)
 
@@ -311,7 +316,7 @@ normalLikeAD2 nSamp nObs std gen (xs, q) = do
           (\eps ->
              V.sum $
              V.map
-               ((V.! 0) . paramGradOfLogQ (normalDistr (transform q eps) std))
+               (mean . paramGradOfLogQ (normalDistr (transform q eps) std))
                (obs :: V.Vector Double))
           samples
       , samples))
@@ -332,14 +337,14 @@ normalFit xs =
       known $
       (N (Node
             1
-            (V.replicate 2 0)
+            (normalDistr 0 0)
             (fromIntegral nSamp)
             qDist
             prior
             (rho alpha eta tau epsilon)) :: PropNode NormalDist Double)
     xProp <-
       known $
-      (N (Node 1 (V.empty) 0 xDist (O V.empty) (\_x1 _x2 -> (V.empty, V.empty))) :: PropNode Obs Double)
+      (N (Node 1 (O V.empty) 0 xDist (O V.empty) (\_x1 _x2 -> (O V.empty, O V.empty))) :: PropNode Obs Double)
   -- qNormalProp 1.0 gen1 nSamp xs q
   -- qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
     qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
