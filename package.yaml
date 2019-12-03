@@ -26,6 +26,7 @@ dependencies:
 - primitive
 - vector
 - ad
+- math-functions
 
 library:
   source-dirs: src

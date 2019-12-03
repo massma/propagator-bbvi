@@ -7,6 +7,7 @@ import Data.Propagator
 import Control.Monad.ST
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
+import Numeric.SpecFunctions (logGamma, digamma)
 import System.Random.MWC (create, uniform, initialize, GenST, uniformR)
 import Statistics.Distribution
 import Statistics.Distribution.Normal
@@ -25,15 +26,15 @@ class VariationalLogic a where
   logProb :: a -> Random -> Double
   paramVector :: a -> V.Vector Double
   fromParamVector :: V.Vector Double -> a
-  gradNuLogQ :: a -> Random -> V.Vector Double -- nu are parameters to variational family
+  paramGradOfLogQ :: a -> Random -> V.Vector Double -- gradient of parameters evauated at some sample of x
   nParams :: a -> Int
   transform :: a -> Random -> Random
   -- inv transform?
   resample :: a -> GenST s -> ST s Random
 
 class VariationalLogic a => Differentiable a where
-  gradNuTransform :: a -> Random -> V.Vector Double
-  gradZQ :: a -> Random -> Double
+  gradTransform :: a -> Random -> V.Vector Double
+  sampleGradOfLogQ :: a -> Random -> Double -- gradient of a sample evaluate with params of q
 
 type Time = Int
 
@@ -74,15 +75,35 @@ instance VariationalLogic Obs where
   logProb _d _x = 0.0
   paramVector (O d) = d
   fromParamVector v = (O v)
-  gradNuLogQ _d _x = V.empty
+  paramGradOfLogQ _d _x = V.empty
   nParams _d = 0
   transform _d eps = eps
   resample (O d) gen =
     return . D . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
 
 instance Differentiable Obs where
-  gradNuTransform _d _x = V.empty
-  gradZQ _d _x = 0.0
+  gradTransform _d _x = V.empty
+  sampleGradOfLogQ _d _x = 0.0
+
+newtype Dirichlet = Diri (V.Vector Double) deriving (Show, Eq, Ord, Read)
+
+logB :: Dirichlet -> Double
+logB (Diri alphas) = V.sum (V.map logGamma alphas) - logGamma (V.sum alphas)
+
+instance VariationalLogic Dirichlet where
+  logProb (Diri diri) (V cat) =
+    V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) diri cat) -
+    logB (Diri diri)
+  paramVector (Diri diri) = diri
+  fromParamVector = Diri
+  paramGradOfLogQ (Diri diri) (V cat) =
+    V.zipWith (\a x -> summed - digamma a + a * log x) diri cat
+    where
+      summed = digamma (V.sum cat)
+  nParams (Diri diri) = V.length diri
+  transform _d x = x
+  resample (Diri diri) gen = V <$> MWCD.dirichlet diri gen
+
 
 instance VariationalLogic a => Propagated (PropNode a) where
   merge (N node) (U (deltaM, g))
@@ -107,7 +128,7 @@ instance VariationalLogic NormalDistribution where
   paramVector d = V.fromList [mean d, stdDev d]
   fromParamVector v = normalDistr (v V.! 0) ((v V.! 1))
   nParams _d = 2
-  gradNuLogQ d (D x) = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
+  paramGradOfLogQ d (D x) = V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
     where
       mu = mean d
       std = stdDev d
@@ -115,8 +136,8 @@ instance VariationalLogic NormalDistribution where
   resample _d gen = D <$> MWCD.standard gen
 
 instance Differentiable NormalDistribution where
-  gradZQ d (D z) = -(z - mean d)/(stdDev d ** 2)
-  gradNuTransform _d (D epsilon) = V.fromList [1.0 , epsilon]
+  sampleGradOfLogQ d (D z) = -(z - mean d)/(stdDev d ** 2)
+  gradTransform _d (D epsilon) = V.fromList [1.0 , epsilon]
 
 gradient :: VariationalLogic a => Node a -> (Weight, V.Vector Double, Sample) -> PropNode a
 gradient q@(Node{..}) (nFactors, like, samples) =
@@ -125,7 +146,7 @@ gradient q@(Node{..}) (nFactors, like, samples) =
     summed =
       V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
-        (\s l -> V.map (* (l + nFactors / weight * (logProb prior s - logProb dist s))) (gradNuLogQ dist s))
+        (\s l -> V.map (* (l + nFactors / weight * (logProb prior s - logProb dist s))) (paramGradOfLogQ dist s))
         samples
         like
     grad = V.map (/ (fromIntegral $ V.length summed)) summed
@@ -143,9 +164,9 @@ gradientAD q@(Node {..}) (nFactors, like, samples) =
            V.map
              (* (l +
                  nFactors / weight *
-                 (gradZQ prior (transform dist s) -
-                  gradZQ dist (transform dist s))))
-             (gradNuTransform dist s))
+                 (sampleGradOfLogQ prior (transform dist s) -
+                  sampleGradOfLogQ dist (transform dist s))))
+             (gradTransform dist s))
         samples
         like
     grad = V.map (/ (fromIntegral $ V.length summed)) summed
@@ -235,7 +256,7 @@ normalLikeAD nSamp std gen xs q =
       , V.map
           (\eps ->
              V.sum $
-             V.map ((V.! 0) . gradNuLogQ (normalDistr (fromRD $ transform q eps) std)) xs)
+             V.map ((V.! 0) . paramGradOfLogQ (normalDistr (fromRD $ transform q eps) std)) xs)
           samples
       , samples)
 
@@ -251,7 +272,7 @@ normalLikeAD2 nSamp nObs std gen (xs, q) = do
           (\eps ->
              V.sum $
              V.map
-               ((V.! 0) . gradNuLogQ (normalDistr (fromRD $ transform q eps) std))
+               ((V.! 0) . paramGradOfLogQ (normalDistr (fromRD $ transform q eps) std))
                obs)
           samples
       , samples))
