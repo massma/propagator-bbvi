@@ -38,7 +38,7 @@ class (Functor a) => DistUtil a where
   zipDist :: (Double -> Double -> Double) -> a Double -> a Double -> a Double
   norm :: a Double -> Double
 
-class Dist a Double => Differentiable a where
+class (Dist a Double) => Differentiable a where
   gradTransform :: a Double -> Double -> a Double
   sampleGradOfLogQ :: a Double -> Double -> Double -- gradient of a sample evaluate with params of q
   transform :: a Double -> Double -> Double
@@ -392,6 +392,9 @@ genMixture = do
 --     (N q') <- fromMaybe (error "impos") <$> content q
 --     (N xs') <- fromMaybe (error "impos") <$> content xProp
 --     return (dist q', time q', Samp.mean xs, time xs')
+
+-- testF :: Floating a => [a] -> a -> a
+-- testF [a, b] c = a*b + c
 
 someFunc :: IO ()
 someFunc = do
