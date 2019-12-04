@@ -8,7 +8,7 @@ import Data.Propagator
 import Control.Monad.ST
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
-import Numeric.AD (grad, auto)
+import Numeric.AD (grad, auto, diff)
 import Numeric.MathFunctions.Constants (m_sqrt_2_pi)
 import Numeric.SpecFunctions (logGamma, digamma)
 import System.Random.MWC (create, uniform, initialize, GenST, uniformR)
@@ -30,15 +30,16 @@ type SampleDouble = Double
 class Sampleable a c where
   resample :: a Double -> GenST s -> ST s c
 
-class (Functor a, DistUtil a) => Dist a c where
-  logProb :: a Double -> c -> Double
-  paramGradOfLogQ ::  a Double -> c -> a Double -- gradient of parameters evauated at some sample of x
-
 class (Functor a) => DistUtil a where
   zipDist :: (Double -> Double -> Double) -> a Double -> a Double -> a Double
   norm :: a Double -> Double
 
+class (Functor a, Sampleable a c, DistUtil a) => Dist a c where
+  logProb :: a Double -> c -> Double
+  paramGradOfLogQ ::  a Double -> c -> a Double -- gradient of parameters evauated at some sample of x
+
 class (Functor a) => Differentiable a where
+  diffableLogProb :: (Floating b) => a b -> b -> b
   gradTransform :: (Floating b) => a b -> b -> a b
   sampleGradOfLogQ :: (Floating b) => a b -> b -> b -- gradient of a sample evaluate with params of q
   transform :: (Floating b) => a b -> b -> b
@@ -160,10 +161,15 @@ instance Sampleable NormalDist Double where
   resample d gen = MWCD.normal (mean d) (stdDev d) gen -- transform d <$> epsilon d gen
 
 instance Differentiable NormalDist where
+  diffableLogProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
+    where
+      xm = x - mean d
+      sd = stdDev d
+      ndPdfDenom = log $ sqrt (2*pi) * sd
   transform d eps = mean d + stdDev d * eps
   epsilon _d gen = realToFrac <$> MWCD.standard gen
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
-  gradTransform d eps = ND $ V.fromList [1.0 , eps] -- grad (\d' -> transform d' (auto epsilon)) d -- ND $ V.fromList [1.0 , epsilon] -- --
+  gradTransform _d eps = ND $ V.fromList [1.0 , eps] -- grad (\d' -> transform d' (auto eps)) d
 
 instance DistUtil NormalDist where
   zipDist f (ND x1) (ND x2) = ND $ V.zipWith f x1 x2
@@ -221,7 +227,7 @@ gradientReparam = gradient f
              sampleGradOfLogQ dist (transform dist s))))
         (gradTransform dist s)
 
-rho alpha eta tau eps grad Node{..} =
+rho alpha eta tau eps gra Node{..} =
   ( deltaM
   , zipDist
       (\ds s ->
@@ -229,30 +235,7 @@ rho alpha eta tau eps grad Node{..} =
          (1.0 / (tau + sqrt (s + ds))))
       deltaM memory)
   where
-    deltaM = zipDist (\g s -> alpha * g ^ (2 :: Int) - alpha * s) grad memory
-
--- | TODO: try making obs a Node and see if it still performant
--- implement weight on each propgator, and then divide by each
--- variationa distributions' factor (I was doing this wrong).
-qProp likeFunc q =
-  watch q $ \(N q') -> write q =<< (gradientScore q' <$> likeFunc (dist q'))
-
-qPropAD likeFunc q =
-  watch q $ \(N q') -> write q =<< (gradientReparam q' <$> likeFunc (dist q'))
-
-qProp2 likeFunc (q1, q2) =
-  watch q1 $ \(N q1') ->
-    watch q2 $ \(N q2') -> do
-      (w, l, (s1, s2)) <- likeFunc (dist q1', dist q2')
-      write q1 (gradientScore q1' (w, l, s1))
-      write q2 (gradientScore q2' (w, l, s2))
-
-qPropAD2 likeFunc (q1, q2) =
-  watch q1 $ \(N q1') ->
-    watch q2 $ \(N q2') -> do
-      (l1, l2) <- likeFunc (dist q1', dist q2')
-      write q1 (gradientReparam q1' l1)
-      write q2 (gradientReparam q2' l2)
+    deltaM = zipDist (\g s -> alpha * g ^ (2 :: Int) - alpha * s) gra memory
 
 normalLike nSamp std gen xs q =
   V.replicateM nSamp (resample q gen) >>= \samples ->
@@ -264,16 +247,16 @@ normalLike nSamp std gen xs q =
           samples
       , samples)
 
--- normalLike2 nSamp nObs std gen (xs, q) = do
+-- normalLike2 nSamp std gen (xs, q) = do
 --   samples <- V.replicateM nSamp (resample q gen)
 --   obs <- V.replicateM nSamp (resample xs gen)
+--   let like = V.map
+--                (\eps ->
+--                   V.sum $ V.map (logProb (normalDistr (transform q eps) std)) obs)
+--                samples
 --   return
---     ( fromIntegral nObs
---     , V.map
---         (\eps ->
---            V.sum $ V.map (logProb (normalDistr (transform q eps) std) . fromRD) obs)
---         samples
---     , (V.empty, samples))
+--     ( U (O V.empty, O V.empty)
+--     , gradientScore q (fromIntegral nObs, like, samples))
 
 -- | specialize all fmaps to vector???
 -- CAREFUL: with rao-blackweixation and my wieghting approach, all terms
@@ -289,22 +272,21 @@ normalLikeAD nSamp std gen xs q =
           samples
       , samples)
 
-normalLikeAD2 nSamp nObs std gen (xs, q) = do
-  obs <- V.replicateM nObs (resample xs gen)
+normalLikeAD2 nSamp std gen (xsN, qN) = do
+  obs <- V.replicateM nSamp (resample xs gen)
   samples <- V.replicateM nSamp (epsilon q gen)
-  return
-    ( ( (fromIntegral nObs)
-      , V.empty
-      , V.empty)
-    , ( (fromIntegral nObs)
-      , V.map
+  let gradLikes =
+        V.map
           (\eps ->
              V.sum $
              V.map
                (mean . paramGradOfLogQ (normalDistr (transform q eps) std))
                (obs :: V.Vector Double))
           samples
-      , samples))
+  return $ gradientReparam qN ((fromIntegral nSamp), gradLikes, samples)
+  where
+    xs = dist xsN
+    q = dist qN
 
 normalFit xs =
   runST $ do
@@ -320,7 +302,7 @@ normalFit xs =
     let xDist = (O xs)
     q <-
       known $
-       N
+      N
         (Node
            1
            (normalDistr 0 0)
@@ -330,16 +312,22 @@ normalFit xs =
            (rho alpha eta tau epsilon))
     xProp <-
       known $
-       N (Node
-            1
-            (O V.empty)
-            0
-            xDist
-            (O V.empty)
-            (\_x1 _x2 -> (O V.empty, O V.empty)))
+      N
+        (Node
+           1
+           (O V.empty)
+           0
+           xDist
+           (O V.empty)
+           (\_x1 _x2 -> (O V.empty, O V.empty)))
   -- qNormalProp 1.0 gen1 nSamp xs q
   -- qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
-    qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
+    (\qP xP ->
+       watch qP $ \(N q') ->
+         with xP $ \(N xs') -> normalLikeAD2 nSamp 1.0 gen1 (xs', q') >>= write q)
+      q
+      xProp
+    -- qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
     (N q') <- fromMaybe (error "impos") <$> content q
     (N xs') <- fromMaybe (error "impos") <$> content xProp
     return (dist q', time q', Samp.mean xs, time xs')

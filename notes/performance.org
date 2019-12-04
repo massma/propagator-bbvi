@@ -723,3 +723,71 @@ user	0m9.804s
 sys	0m3.104s
 
 Compilation finished at Wed Dec  4 11:21:29
+* using autodiff instead of deterministic f for gradtransform
+  (ND [5.0583721972032265,9.977285900179446e-2],7050,5.062808516091027,1)
+  24,024,945,104 bytes allocated in the heap
+   1,075,198,272 bytes copied during GC
+       2,409,528 bytes maximum residency (331 sample(s))
+         101,976 bytes maximum slop
+               2 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     22921 colls, 22921 par    4.784s   1.543s     0.0001s    0.0078s
+  Gen  1       331 colls,   330 par    0.368s   0.128s     0.0004s    0.0059s
+
+  Parallel GC work balance: 26.04% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    5.256s  (  6.000s elapsed)
+  GC      time    5.152s  (  1.671s elapsed)
+  EXIT    time    0.000s  (  0.009s elapsed)
+  Total   time   10.408s  (  7.681s elapsed)
+
+  Alloc rate    4,570,956,070 bytes per MUT second
+
+  Productivity  50.5% of total user, 78.1% of total elapsed
+
+
+real	0m7.781s
+user	0m10.516s
+sys	0m3.424s
+
+Compilation finished at Wed Dec  4 11:25:57
+* added more flexible and direct programming
+  (ND [5.0583721972032265,9.977285900179446e-2],7050,5.062808516091027,1)
+  21,080,294,480 bytes allocated in the heap
+     551,244,808 bytes copied during GC
+       2,448,352 bytes maximum residency (177 sample(s))
+         144,672 bytes maximum slop
+               2 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     20190 colls, 20190 par    3.012s   0.895s     0.0000s    0.0146s
+  Gen  1       177 colls,   176 par    0.224s   0.066s     0.0004s    0.0025s
+
+  Parallel GC work balance: 26.17% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    4.808s  (  5.402s elapsed)
+  GC      time    3.236s  (  0.961s elapsed)
+  EXIT    time    0.000s  (  0.007s elapsed)
+  Total   time    8.044s  (  6.370s elapsed)
+
+  Alloc rate    4,384,420,648 bytes per MUT second
+
+  Productivity  59.8% of total user, 84.8% of total elapsed
+
+
+real	0m6.469s
+user	0m8.128s
+sys	0m1.884s
+
+Compilation finished at Wed Dec  4 13:07:40
