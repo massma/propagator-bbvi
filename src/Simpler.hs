@@ -38,11 +38,11 @@ class (Functor a) => DistUtil a where
   zipDist :: (Double -> Double -> Double) -> a Double -> a Double -> a Double
   norm :: a Double -> Double
 
-class (Dist a Double) => Differentiable a where
-  gradTransform :: a Double -> Double -> a Double
-  sampleGradOfLogQ :: a Double -> Double -> Double -- gradient of a sample evaluate with params of q
-  transform :: a Double -> Double -> Double
-  epsilon ::  a Double -> GenST s -> ST s Double
+class (Functor a) => Differentiable a where
+  gradTransform :: (Floating b) => a b -> b -> a b
+  sampleGradOfLogQ :: (Floating b) => a b -> b -> b -- gradient of a sample evaluate with params of q
+  transform :: (Floating b) => a b -> b -> b
+  epsilon ::  (Floating b) => a b -> GenST s -> ST s b
 
 normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 
@@ -92,8 +92,6 @@ instance DistUtil Obs where
   norm _ = 0.0
 
 instance Differentiable Obs where
-  gradTransform _d _x = O V.empty
-  sampleGradOfLogQ _d _x = 0.0
 
 newtype Dirichlet a = Diri (V.Vector a) deriving (Show, Eq, Ord, Read)
 
@@ -159,11 +157,11 @@ instance Traversable NormalDist where
   traverse f (ND diri) = ND <$> traverse f diri
 
 instance Sampleable NormalDist Double where
-  resample d gen = transform d <$> epsilon d gen
+  resample d gen = MWCD.normal (mean d) (stdDev d) gen -- transform d <$> epsilon d gen
 
 instance Differentiable NormalDist where
   transform d eps = mean d + stdDev d * eps
-  epsilon _d gen = MWCD.standard gen
+  epsilon _d gen = realToFrac <$> MWCD.standard gen
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
   gradTransform d eps = ND $ V.fromList [1.0 , eps] -- grad (\d' -> transform d' (auto epsilon)) d -- ND $ V.fromList [1.0 , epsilon] -- --
 
@@ -209,7 +207,7 @@ gradient f q@(Node{..}) (nFactors, like, samples) =
 
 -- | TODO: speed up by calc length in one pass
 gradientReparam ::
-     Differentiable a
+     (DistUtil a, Differentiable a)
   => Node a Double
   -> (Double, V.Vector Double, Samples Double)
   -> PropNode a Double
