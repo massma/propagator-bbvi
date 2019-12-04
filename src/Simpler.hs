@@ -8,7 +8,7 @@ import Data.Propagator
 import Control.Monad.ST
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
-import Numeric.AD (grad, auto, diff)
+import Numeric.AD (grad, grad', auto, diff)
 import Numeric.MathFunctions.Constants (m_sqrt_2_pi)
 import Numeric.SpecFunctions (logGamma, digamma)
 import System.Random.MWC (create, uniform, initialize, GenST, uniformR)
@@ -22,10 +22,6 @@ import qualified Statistics.Sample as Samp
 type SampleVector = V.Vector Double
 
 type SampleDouble = Double
-
--- data Sample = V SampleVector | D SampleDouble
-
--- fromRD (D x) = x
 
 class Sampleable a c where
   resample :: a Double -> GenST s -> ST s c
@@ -50,7 +46,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 maxStep :: Time
-maxStep = 10000 -- 4664 -- 100000
+maxStep = 100000 -- 4664 -- 100000
 
 type Samples = V.Vector
 
@@ -89,6 +85,8 @@ instance DistUtil Obs where
 instance Differentiable Obs where
 
 newtype Dirichlet a = Diri (V.Vector a) deriving (Show, Eq, Ord, Read)
+
+dirichlet = Diri
 
 logB :: Dirichlet Double -> Double
 logB (Diri alphas) = V.sum (V.map logGamma alphas) - logGamma (V.sum alphas)
@@ -137,6 +135,9 @@ instance DistUtil a => Propagated (PropNode a Double) where
   merge (N _) (N _) = Contradiction mempty "Trying overwrite a node"
 
 newtype NormalDist a = ND (V.Vector a) deriving (Show, Eq, Ord, Read)
+
+fromPropNode (N node) = node
+fromPropNode (U _ _) = error "called from prop node on update"
 
 mean (ND xs) = xs V.! 0
 stdDev (ND xs) = xs V.! 1
@@ -282,6 +283,45 @@ normalLikeAD2 nSamp std gen (xsN, qN) = do
     xs = dist xsN
     q = dist qN
 
+mixedLike nSamp std gen xsN thetaN betasN = do
+  obs <- V.replicateM nSamp (resample xs gen)
+  thetaSamp <- V.replicateM nSamp (resample theta gen)
+  betaSamples <- V.replicateM nSamp (epsilon (betas V.! 0) gen)
+  let (likes, gradLikes) =
+        V.unzip $
+        V.zipWith
+          (\eps th ->
+             V.foldl1' (\(x1, y1) (x2, y2) -> (x1 + x2, V.zipWith (+) y1 y2)) $
+             V.map
+               (\x ->
+                  grad'
+                    (\bs ->
+                       logSum
+                         (V.map (auto . log) th)
+                         (V.map
+                            (\mu ->
+                               diffableLogProb
+                                 (normalDistr mu (auto std))
+                                 (auto x))
+                            bs))
+                    (V.map (\d -> transform d eps) betas))
+               (obs :: V.Vector Double))
+          betaSamples
+          thetaSamp
+  return $
+    ( gradientScore thetaN (fromIntegral nSamp, likes, thetaSamp)
+    , V.imap
+        (\i d ->
+           gradientReparam
+             d
+             (fromIntegral nSamp, V.map (V.! i) gradLikes, betaSamples))
+        betasN)
+  where
+    logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
+    xs = dist xsN
+    theta = dist thetaN
+    betas = V.map dist betasN
+
 normalFit xs =
   runST $ do
     genG <- create
@@ -290,7 +330,7 @@ normalFit xs =
     let nSamp = 100
     let qDist = normalDistr 0.0 2.0
     let alpha = 0.1 -- from kuckelbier et al
-    let eta = 100 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    let eta = 0.01 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     let tau = 1.0
     let eps = 1e-16 -- (fromIntegral $ V.length xs)
     let xDist = (O xs)
@@ -314,8 +354,6 @@ normalFit xs =
            xDist
            (O V.empty)
            (\_x1 _x2 -> (O V.empty, O V.empty)))
-  -- qNormalProp 1.0 gen1 nSamp xs q
-  -- qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
     (\qP xP ->
        watch qP $ \(N q') ->
          with xP $ \(N xs') -> normalLikeAD2 nSamp 1.0 gen1 (xs', q') >>= write q)
@@ -325,6 +363,66 @@ normalFit xs =
     (N q') <- fromMaybe (error "impos") <$> content q
     (N xs') <- fromMaybe (error "impos") <$> content xProp
     return (dist q', time q', Samp.mean xs, time xs')
+
+mixedFit xs =
+  runST $ do
+    genG <- create
+    gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+    let priorTheta = Diri (V.fromList [1.0, 1.0])
+    let priorBeta = normalDistr 0.0 1.0
+    let nSamp = 100
+    let alpha = 0.1 -- from kuckelbier et al
+    let eta = 100 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    let tau = 1.0
+    let eps = 1e-16 -- (fromIntegral $ V.length xs)
+    let xDist = (O xs)
+    let nClusters = 2
+    qBetas <- V.replicateM nClusters
+      (do
+          known $
+           N
+            (Node
+               1
+               (normalDistr 0 0)
+               (fromIntegral nSamp)
+               (normalDistr 0.0 2.0)
+               priorBeta
+               (rho alpha eta tau eps)))
+    qThetas <-
+      (known $
+           N
+            (Node
+               1
+               (dirichlet $ V.replicate nClusters 0.0)
+               (fromIntegral (nSamp * nClusters))
+               (dirichlet $ V.replicate nClusters 1.0)
+               priorTheta
+               (rho alpha eta tau eps)))
+    xProp <-
+      known $
+      N
+        (Node
+           1
+           (O V.empty)
+           0
+           xDist
+           (O V.empty)
+           (\_x1 _x2 -> (O V.empty, O V.empty)))
+    (\tP bPs xP ->
+       watch tP $ \(N theta') ->
+        with xP $ \(N xs') -> do
+           betasP <- V.mapM ((fromPropNode . fromMaybe (error "impos") <$>) . content) bPs
+           (upTh, upB) <- mixedLike nSamp 1.0 gen1 xs' theta' betasP
+           V.mapM_ (uncurry write) $ V.zip bPs upB
+           write tP upTh)
+      qThetas
+      qBetas
+      xProp
+    -- qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
+    (N thetaF) <- fromMaybe (error "impos") <$> content qThetas
+    betaF <- V.mapM ((fromPropNode . fromMaybe (error "impos") <$>) . content) qBetas
+    return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
+
 
 genNormal = do
   gen <- create
@@ -340,41 +438,6 @@ genMixture = do
           [MWCD.normal 2.0 std gen :: IO Double, MWCD.normal (-2.0) std gen]
   xs <- V.replicateM 1000 ((mixtures V.!) =<< theta')
   return xs
-
--- mixtureFit xs =
---   runST $ do
---     genG <- create
---     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
---     let priorTheta = Diri (V.fromList [1.0, 1.0])
---     let priorBeta = V.fromList [normalDistr 0.0 1.0, normalDistr 0.0 1.0]
---     let nSamp = 100
---     let qDist = normalDistr 0.0 2.0
---     let alpha = 0.1 -- from kuckelbier et al
---     let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
---     let tau = 1.0
---     let epsilon = 1e-16 -- (fromIntegral $ V.length xs)
---     let xDist = (O xs)
---     q <-
---       known $
---       (N (Node
---             1
---             (V.replicate 2 0)
---             (fromIntegral nSamp)
---             qDist
---             prior
---             (rho alpha eta tau epsilon)) :: PropNode NormalDist Double)
---     xProp <-
---       known $
---       (N (Node 1 (V.empty) 0 xDist (O V.empty) (\_x1 _x2 -> (V.empty, V.empty))) :: PropNode Obs Double)
---   -- qNormalProp 1.0 gen1 nSamp xs q
---   -- qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
---     qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
---     (N q') <- fromMaybe (error "impos") <$> content q
---     (N xs') <- fromMaybe (error "impos") <$> content xProp
---     return (dist q', time q', Samp.mean xs, time xs')
-
--- testF :: Floating a => [a] -> a -> a
--- testF [a, b] c = a*b + c
 
 someFunc :: IO ()
 someFunc = do
