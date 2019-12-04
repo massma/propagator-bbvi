@@ -50,19 +50,13 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 maxStep :: Time
-maxStep = 100000 -- 4664 -- 100000
-
-type Memory = V.Vector Double
+maxStep = 10000 -- 4664 -- 100000
 
 type Samples = V.Vector
 
-type Likelihood = V.Vector Double
-
-type Weight = Double
-
-type Gradient = V.Vector Double
-
-data PropNode a b = N (Node a b) | U (a b, a b) -- memory, gradient
+data PropNode a b = N (Node a b) | U { memoryUpdate :: !(a b)
+                                     , gradientUpdate :: !(a b)
+                                     } -- memory, gradient
 
 data Node a b = Node
   { time :: !Time
@@ -125,8 +119,8 @@ instance DistUtil Dirichlet where
   norm (Diri x1) = normVec x1
 
 instance DistUtil a => Propagated (PropNode a Double) where
-  merge (N node) (U (deltaM, g))
-    | norm g < 0.00001 = Change False (N node) -- 0.00001
+  merge (N node) (U { .. })
+    | norm gradientUpdate < 0.00001 = Change False (N node) -- 0.00001
     | time node >= maxStep = Change False (N node)
     | otherwise = Change True updateNode
     where
@@ -134,12 +128,12 @@ instance DistUtil a => Propagated (PropNode a Double) where
         N
           (node
              { time = (time node) + 1
-             , memory = zipDist (+) (memory node) deltaM
+             , memory = zipDist (+) (memory node) memoryUpdate
              , dist = newQ
              })
         where
-          newQ = zipDist (+) (dist node) g
-  merge (U _) _ = Contradiction mempty "Trying to update a gradient"
+          newQ = zipDist (+) (dist node) gradientUpdate
+  merge (U _ _) _ = Contradiction mempty "Trying to update a gradient"
   merge (N _) (N _) = Contradiction mempty "Trying overwrite a node"
 
 newtype NormalDist a = ND (V.Vector a) deriving (Show, Eq, Ord, Read)
@@ -200,7 +194,7 @@ gradientScore = gradient f
         (paramGradOfLogQ dist s)
 
 gradient f q@(Node{..}) (nFactors, like, samples) =
-  U (memory', zipDist (*) rho' grad)
+  U memory' (zipDist (*) rho' grad)
   where
     summed =
       V.foldl' (zipDist (+)) (fmap (const 0.0) dist) $
@@ -296,9 +290,9 @@ normalFit xs =
     let nSamp = 100
     let qDist = normalDistr 0.0 2.0
     let alpha = 0.1 -- from kuckelbier et al
-    let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    let eta = 100 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     let tau = 1.0
-    let epsilon = 1e-16 -- (fromIntegral $ V.length xs)
+    let eps = 1e-16 -- (fromIntegral $ V.length xs)
     let xDist = (O xs)
     q <-
       known $
@@ -309,7 +303,7 @@ normalFit xs =
            (fromIntegral nSamp)
            qDist
            prior
-           (rho alpha eta tau epsilon))
+           (rho alpha eta tau eps))
     xProp <-
       known $
       N
