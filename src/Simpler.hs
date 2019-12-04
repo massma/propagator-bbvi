@@ -27,27 +27,24 @@ type SampleDouble = Double
 
 -- fromRD (D x) = x
 
-class (Functor a) => Dist a where
-  -- | transform <$> resample = true sample from dist
-  transform :: a b -> c -> c
-  -- inv transform?
-  resample :: a b -> GenST s -> ST s c
+class Sampleable a c where
+  resample :: a Double -> GenST s -> ST s c
 
-class (Functor a) => VariUtil a where
-  zipDist :: (b -> b -> b) -> a b -> a b -> a b
-  norm :: a b -> b
+class (Functor a, DistUtil a) => Dist a c where
+  logProb :: a Double -> c -> Double
+  paramGradOfLogQ ::  a Double -> c -> a Double -- gradient of parameters evauated at some sample of x
 
-class (VariUtil a, Dist a) => VariLogic a where
-  logProb :: a b -> c -> b
-  paramGradOfLogQ :: a b -> c -> a b -- gradient of parameters evauated at some sample of x
+class (Functor a) => DistUtil a where
+  zipDist :: (Double -> Double -> Double) -> a Double -> a Double -> a Double
+  norm :: a Double -> Double
 
-class VariLogic a => Differentiable a where
-  gradTransform :: a b -> c -> a b
-  sampleGradOfLogQ :: a b -> c -> b -- gradient of a sample evaluate with params of q
+class Dist a Double => Differentiable a where
+  gradTransform :: a Double -> Double -> a Double
+  sampleGradOfLogQ :: a Double -> Double -> Double -- gradient of a sample evaluate with params of q
+  transform :: a Double -> Double -> Double
+  epsilon ::  a Double -> GenST s -> ST s Double
 
-instance VariUtil V.Vector where
-  zipDist = V.zipWith
-  norm = sqrt . V.sum . V.map (^ (2 :: Int))
+normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 
 type Time = Int
 
@@ -64,7 +61,7 @@ type Weight = Double
 
 type Gradient = V.Vector Double
 
-data PropNode a b c = N (Node a b) | U (a b, a b) -- memory, gradient
+data PropNode a b = N (Node a b) | U (a b, a b) -- memory, gradient
 
 data Node a b = Node
   { time :: !Time
@@ -79,23 +76,22 @@ newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
 
 fromO (O v) = v
 
-instance Dist Obs Double Double where
-  transform _d eps = eps
+instance Sampleable Obs Double where
   resample (O d) gen =
     return . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
 
 instance Functor Obs where
-  fmap _f _o = O V.empty -- WARNING: does not satisfy functor laws
+  fmap f (O d) = O $ V.map f d
 
-instance VariUtil Obs Double where
+instance Dist Obs Double where
+  logProb _d _x = 0
+  paramGradOfLogQ _d _x = O V.empty
+
+instance DistUtil Obs where
   zipDist _f _o1 _o2 = O V.empty
   norm _ = 0.0
 
-instance VariLogic Obs Double Double where
-  logProb _d _x = 0.0
-  paramGradOfLogQ _d _x = O V.empty
-
-instance Differentiable Obs Double Double where
+instance Differentiable Obs where
   gradTransform _d _x = O V.empty
   sampleGradOfLogQ _d _x = 0.0
 
@@ -104,8 +100,7 @@ newtype Dirichlet a = Diri (V.Vector a) deriving (Show, Eq, Ord, Read)
 logB :: Dirichlet Double -> Double
 logB (Diri alphas) = V.sum (V.map logGamma alphas) - logGamma (V.sum alphas)
 
-instance Dist Dirichlet Double SampleVector where
-  transform _d x = x
+instance Sampleable Dirichlet (V.Vector Double) where
   resample (Diri diri) gen = MWCD.dirichlet diri gen
 
 instance Functor Dirichlet where
@@ -117,11 +112,7 @@ instance Foldable Dirichlet where
 instance Traversable Dirichlet where
   traverse f (Diri diri) = Diri <$> traverse f diri
 
-instance VariUtil Dirichlet Double where
-  zipDist f (Diri x1) (Diri x2) = Diri $ V.zipWith f x1 x2
-  norm (Diri x1) = norm x1
-
-instance VariLogic Dirichlet Double SampleVector where
+instance Dist Dirichlet (V.Vector Double) where
   logProb (Diri diri) cat =
     V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) diri cat) -
     logB (Diri diri)
@@ -130,7 +121,11 @@ instance VariLogic Dirichlet Double SampleVector where
     where
       summed = digamma (V.sum cat)
 
-instance VariLogic a b c => Propagated (PropNode a b c) where
+instance DistUtil Dirichlet where
+  zipDist f (Diri x1) (Diri x2) = Diri $ V.zipWith f x1 x2
+  norm (Diri x1) = normVec x1
+
+instance DistUtil a => Propagated (PropNode a Double) where
   merge (N node) (U (deltaM, g))
     | norm g < 0.00001 = Change False (N node) -- 0.00001
     | time node >= maxStep = Change False (N node)
@@ -163,15 +158,20 @@ instance Foldable NormalDist where
 instance Traversable NormalDist where
   traverse f (ND diri) = ND <$> traverse f diri
 
-instance Dist NormalDist Double SampleDouble where
-  transform d epsilon = mean d + stdDev d * epsilon
-  resample _d gen = MWCD.standard gen
+instance Sampleable NormalDist Double where
+  resample d gen = transform d <$> epsilon d gen
 
-instance VariUtil NormalDist Double where
+instance Differentiable NormalDist where
+  transform d eps = mean d + stdDev d * eps
+  epsilon _d gen = MWCD.standard gen
+  sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
+  gradTransform d eps = ND $ V.fromList [1.0 , eps] -- grad (\d' -> transform d' (auto epsilon)) d -- ND $ V.fromList [1.0 , epsilon] -- --
+
+instance DistUtil NormalDist where
   zipDist f (ND x1) (ND x2) = ND $ V.zipWith f x1 x2
-  norm (ND x) = norm x
+  norm (ND x) = normVec x
 
-instance VariLogic NormalDist Double SampleDouble where
+instance Dist NormalDist Double where
   logProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
     where
       xm = x - mean d
@@ -183,15 +183,11 @@ instance VariLogic NormalDist Double SampleDouble where
       mu = mean d
       std = stdDev d
 
-instance Differentiable NormalDist Double SampleDouble where
-  sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
-  gradTransform d epsilon = grad (\d' -> transform d' (auto epsilon)) d -- ND $ V.fromList [1.0 , epsilon] -- --ND $ V.fromList [1.0 , epsilon] --
-
 gradientScore ::
-     VariLogic a b c
-  => Node a b
-  -> (b, V.Vector b, Samples c)
-  -> PropNode a b c
+     Dist a c
+  => Node a Double
+  -> (Double, V.Vector Double, Samples c)
+  -> PropNode a Double
 gradientScore = gradient f
   where
     f Node {..} nFactors s l =
@@ -213,10 +209,10 @@ gradient f q@(Node{..}) (nFactors, like, samples) =
 
 -- | TODO: speed up by calc length in one pass
 gradientReparam ::
-     Differentiable a b c
-  => Node a b
-  -> (b, V.Vector b, Samples c)
-  -> PropNode a b c
+     Differentiable a
+  => Node a Double
+  -> (Double, V.Vector Double, Samples Double)
+  -> PropNode a Double
 gradientReparam = gradient f
   where
     f Node {..} nFactors s l =
@@ -227,11 +223,11 @@ gradientReparam = gradient f
              sampleGradOfLogQ dist (transform dist s))))
         (gradTransform dist s)
 
-rho alpha eta tau epsilon grad Node{..} =
+rho alpha eta tau eps grad Node{..} =
   ( deltaM
   , zipDist
       (\ds s ->
-         eta * (fromIntegral time) ** (negate 0.5 + epsilon) *
+         eta * (fromIntegral time) ** (negate 0.5 + eps) *
          (1.0 / (tau + sqrt (s + ds))))
       deltaM memory)
   where
@@ -240,27 +236,12 @@ rho alpha eta tau epsilon grad Node{..} =
 -- | TODO: try making obs a Node and see if it still performant
 -- implement weight on each propgator, and then divide by each
 -- variationa distributions' factor (I was doing this wrong).
-qProp ::
-     VariLogic a b c
-  => ((a b) -> ST s (b, V.Vector b, Samples c))
-  -> Cell s (PropNode a b c)
-  -> ST s ()
 qProp likeFunc q =
   watch q $ \(N q') -> write q =<< (gradientScore q' <$> likeFunc (dist q'))
 
-qPropAD ::
-     (Differentiable a b c)
-  => ((a b) -> ST s (b, V.Vector b, Samples c))
-  -> Cell s (PropNode a b c)
-  -> ST s ()
 qPropAD likeFunc q =
   watch q $ \(N q') -> write q =<< (gradientReparam q' <$> likeFunc (dist q'))
 
-qProp2 ::
-     (VariLogic a c e, VariLogic b c d)
-  => ((a c, b c) -> ST s (c, V.Vector c, (Samples e, Samples d)))
-  -> (Cell s (PropNode a c e), Cell s (PropNode b c d))
-  -> ST s ()
 qProp2 likeFunc (q1, q2) =
   watch q1 $ \(N q1') ->
     watch q2 $ \(N q2') -> do
@@ -268,11 +249,6 @@ qProp2 likeFunc (q1, q2) =
       write q1 (gradientScore q1' (w, l, s1))
       write q2 (gradientScore q2' (w, l, s2))
 
-qPropAD2 ::
-     (Differentiable a c e, Differentiable b c d)
-  => (((a c), (b c)) -> ST s ((c, V.Vector c, Samples e), (c, V.Vector c, Samples d)))
-  -> (Cell s (PropNode a c e), Cell s (PropNode b c d))
-  -> ST s ()
 qPropAD2 likeFunc (q1, q2) =
   watch q1 $ \(N q1') ->
     watch q2 $ \(N q2') -> do
@@ -285,8 +261,8 @@ normalLike nSamp std gen xs q =
     return
       ( fromIntegral $ V.length xs
       , V.map
-          (\eps ->
-             V.sum $ V.map (logProb (normalDistr (transform q eps) std)) xs)
+          (\z ->
+             V.sum $ V.map (logProb (normalDistr z std)) xs)
           samples
       , samples)
 
@@ -305,7 +281,7 @@ normalLike nSamp std gen xs q =
 -- CAREFUL: with rao-blackweixation and my wieghting approach, all terms
 -- in log likelihood functions must contain all nodes q
 normalLikeAD nSamp std gen xs q =
-  V.replicateM nSamp (resample q gen) >>= \samples ->
+  V.replicateM nSamp (epsilon q gen) >>= \samples ->
     return
       ( fromIntegral $ V.length xs
       , V.map
@@ -317,7 +293,7 @@ normalLikeAD nSamp std gen xs q =
 
 normalLikeAD2 nSamp nObs std gen (xs, q) = do
   obs <- V.replicateM nObs (resample xs gen)
-  samples <- V.replicateM nSamp (resample q gen)
+  samples <- V.replicateM nSamp (epsilon q gen)
   return
     ( ( (fromIntegral nObs)
       , V.empty
@@ -346,16 +322,23 @@ normalFit xs =
     let xDist = (O xs)
     q <-
       known $
-      (N (Node
-            1
-            (normalDistr 0 0)
-            (fromIntegral nSamp)
-            qDist
-            prior
-            (rho alpha eta tau epsilon)) :: PropNode NormalDist Double Double)
+       N
+        (Node
+           1
+           (normalDistr 0 0)
+           (fromIntegral nSamp)
+           qDist
+           prior
+           (rho alpha eta tau epsilon))
     xProp <-
       known $
-      (N (Node 1 (O V.empty) 0 xDist (O V.empty) (\_x1 _x2 -> (O V.empty, O V.empty))) :: PropNode Obs Double Double)
+       N (Node
+            1
+            (O V.empty)
+            0
+            xDist
+            (O V.empty)
+            (\_x1 _x2 -> (O V.empty, O V.empty)))
   -- qNormalProp 1.0 gen1 nSamp xs q
   -- qPropAD (normalLikeAD nSamp 1.0 gen1 xs) q
     qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
@@ -365,7 +348,7 @@ normalFit xs =
 
 genNormal = do
   gen <- create
-  xs <- V.replicateM 1000 (transform (normalDistr (5.0 :: Double) 3.0) <$> resample (normalDistr (5.0 :: Double) 3.0) gen)
+  xs <- V.replicateM 1000 (resample (normalDistr (5.0 :: Double) 3.0) gen)
   return xs
 
 genMixture = do
