@@ -46,7 +46,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 maxStep :: Time
-maxStep = 100000 -- 4664 -- 100000
+maxStep = 1000000 -- 4664 -- 100000
 
 type Samples = V.Vector
 
@@ -347,7 +347,7 @@ mixedFit xs =
                1
                (normalDistr 0 0)
                (fromIntegral nSamp)
-               (normalDistr mu 2.0)
+               (normalDistr mu 1.0)
                priorBeta
                (rho alpha eta tau eps)))
     qThetas <- resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
