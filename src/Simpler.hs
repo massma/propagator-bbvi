@@ -46,7 +46,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 maxStep :: Time
-maxStep = 10000 -- 4664 -- 100000
+maxStep = 100000 -- 4664 -- 100000
 
 type Samples = V.Vector
 
@@ -118,7 +118,7 @@ instance DistUtil Dirichlet where
 
 instance DistUtil a => Propagated (PropNode a Double) where
   merge (N node) (U { .. })
-    | norm gradientUpdate < 0.00001 = Change False (N node) -- 0.00001
+    | norm gradientUpdate < 0.00000001 = Change False (N node) -- 0.00001
     | time node >= maxStep = Change False (N node)
     | otherwise = Change True updateNode
     where
@@ -283,7 +283,6 @@ normalLikeAD2 nSamp std gen (xsN, qN) = do
     xs = dist xsN
     q = dist qN
 
-
 normalFit xs =
   runST $ do
     genG <- create
@@ -331,18 +330,17 @@ mixedFit xs =
     genG <- create
     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
     let priorTheta = Diri (V.fromList [0.1, 0.1])
-    let priorBeta = normalDistr 0.0 1.0
+    let priorBeta = normalDistr 0.0 4.0
     let nSamp = 10
     let alpha = 0.1 -- from kuckelbier et al
-    let eta = 0.01 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    let eta = 0.01  -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     let tau = 1.0
     let eps = 1e-16 -- (fromIntegral $ V.length xs)
     let xDist = (O xs)
     let nClusters = 2
     qBetas <- V.generateM nClusters
-      (\i -> do
-          let mu = if i == 0 then negate 2 else 2
-          -- mu <- MWCD.standard gen1
+      (\_i -> do
+          mu <- resample priorBeta gen1
           known $
            N
             (Node
@@ -350,16 +348,16 @@ mixedFit xs =
                (normalDistr 0 0)
                (fromIntegral nSamp)
                (normalDistr mu 2.0)
-               (normalDistr mu 1.0)
+               priorBeta
                (rho alpha eta tau eps)))
-    qThetas <-
+    qThetas <- resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
       (known $
            N
             (Node
                1
                (dirichlet $ V.replicate nClusters 0.0)
                (fromIntegral (nSamp))
-               (dirichlet $ V.replicate nClusters 0.1)
+               (dirichlet startTh) -- (dirichlet $ V.replicate nClusters 0.1)
                priorTheta
                (rho alpha eta tau eps)))
     xProp <-
