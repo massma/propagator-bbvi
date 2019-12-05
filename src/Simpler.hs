@@ -47,7 +47,13 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 10000000 -- 4664 -- 100000
+globalMaxStep = 1000000
+
+globalDelta :: Double
+globalDelta = 0.00000001
+
+globalEta :: Double
+globalEta = 0.1
 
 type Samples = V.Vector
 
@@ -62,6 +68,7 @@ fromPropNode (U _ _) = error "called from prop node on update"
 data Node a b = Node
   { time :: !Time
   , maxStep :: !Time
+  , delta :: !Double
   , memory :: !(a b)
   , weight :: !b
   , dist :: !(a b)
@@ -71,7 +78,7 @@ data Node a b = Node
 
 newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
 
-defaultObs xs = (Node 1 globalMaxStep (O V.empty) 0 (O xs) (O V.empty) (\_x1 _x2 -> (O V.empty, O V.empty)))
+defaultObs xs = (Node 1 globalMaxStep globalDelta (O V.empty) 0 (O xs) (O V.empty) (\_x1 _x2 -> (O V.empty, O V.empty)))
 
 fromO (O v) = v
 
@@ -98,6 +105,7 @@ defaultDirichlet prior =
   (Node
      1
      globalMaxStep
+     globalDelta
      (fmap (const 0.0) prior)
      1
      prior
@@ -135,8 +143,8 @@ instance DistUtil Dirichlet where
   norm (Diri x1) = normVec x1
 
 instance DistUtil a => Propagated (PropNode a Double) where
-  merge (N node) (U { .. })
-    | norm gradientUpdate < 0.00000001 = Change False (N node) -- 0.00001
+  merge (N node) (U {..})
+    | norm gradientUpdate < (delta node) = Change False (N node) -- 0.00001
     | time node >= (maxStep node) = Change False (N node)
     | otherwise = Change True updateNode
     where
@@ -150,7 +158,13 @@ instance DistUtil a => Propagated (PropNode a Double) where
         where
           newQ = zipDist (+) (dist node) gradientUpdate
   merge (U _ _) _ = Contradiction mempty "Trying to update a gradient"
-  merge (N _) (N _) = Contradiction mempty "Trying overwrite a node"
+  -- | CAREFUL: below is dangerous if I start doing the ideas i thought
+  -- about: changing maxstep and elta node for local optmizations
+  merge (N node1) (N node2)
+    | (time node2 > time node1) ||
+        (norm (zipDist (-) (dist node1) (dist node2)) >= (delta node1)) =
+      Change True (N node2)
+    | otherwise = Change False (N node1)
 
 newtype NormalDist a = ND (V.Vector a) deriving (Show, Eq, Ord, Read)
 
@@ -158,6 +172,7 @@ defaultNormalDist =
   (Node
      1
      globalMaxStep
+     globalDelta
      (normalDistr 0 0)
      1
      (normalDistr 0 1)
@@ -265,7 +280,7 @@ data KucP = KucP
   } deriving (Show, Eq, Ord, Read)
 
 -- | eta is what you probably want to tune: kucukelbir trys 0.01 0.1 1 10 100
-defaultKucP = KucP {alpha = 0.1, eta = 0.01, tau = 1.0, eps = 1e-16}
+defaultKucP = KucP {alpha = 0.1, eta = globalEta, tau = 1.0, eps = 1e-16}
 
 normalLike nSamp std gen xs q =
   V.replicateM nSamp (resample q gen) >>= \samples ->
@@ -343,50 +358,6 @@ normalFit xs =
     (N xs') <- fromMaybe (error "impos") <$> content xProp
     return (dist q', time q', Samp.mean xs, time xs')
 
-mixedFit xs =
-  runST $ do
-    genG <- create
-    gen1 <- initialize =<< V.replicateM 256 (uniform genG)
-    let priorTheta = Diri (V.fromList [0.1, 0.1])
-    let priorBeta = normalDistr 0.0 4.0
-    let nSamp = 10
-    let xDist = (O xs)
-    let nClusters = 2
-    qBetas <-
-      V.generateM
-        nClusters
-        (\_i -> do
-           mu <- resample priorBeta gen1
-           known $
-             N
-               (defaultNormalDist
-                  { dist = normalDistr mu 1.0
-                  , prior = priorBeta
-                  , weight = fromIntegral nSamp
-                  }))
-    qThetas <-
-      resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
-        (known $
-         N
-           ((defaultDirichlet priorTheta)
-              {dist = dirichlet startTh, weight = fromIntegral nSamp}))
-    xProp <- known $ N $ defaultObs xs
-    (\tP bPs xP ->
-       watch tP $ \(N theta') ->
-         with xP $ \(N xs') -> do
-           betas' <- VM.new (V.length bPs)
-           V.imapM_ (\i bP -> with bP $ \(N b) -> VM.write betas' i b) bPs
-           (upTh, upB) <-
-             mixedLike nSamp 1.0 gen1 xs' theta' =<< V.unsafeFreeze betas' -- xs'
-           V.mapM_ (uncurry write) $ V.zip bPs upB
-           write tP upTh)
-      qThetas
-      qBetas
-      xProp
-    (N thetaF) <- fromMaybe (error "impos") <$> content qThetas
-    betaF <-
-      V.mapM ((fromPropNode . fromMaybe (error "impos") <$>) . content) qBetas
-    return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
 
 mixedLike nSamp std gen xsN thetaN betasN = do
   obs <- V.replicateM nSamp (resample xs gen)
@@ -475,6 +446,85 @@ genMixture = do
           [MWCD.normal 2.0 std gen, MWCD.normal (-2.0) std gen]
   xs <- V.replicateM 1000 ((mixtures V.!) =<< theta')
   return xs
+
+mixedFit xs =
+  runST $ do
+    genG <- create
+    gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+    let priorTheta = Diri (V.fromList [0.1, 0.1])
+    let priorBeta = normalDistr 0.0 4.0
+    let nSamp = 10
+    let nClusters = 2
+    qBetas <-
+      V.generateM
+        nClusters
+        (\_i -> do
+           mu <- resample priorBeta gen1
+           known $
+             N
+               (defaultNormalDist
+                  { dist = normalDistr mu 1.0
+                  , maxStep = globalMaxStep
+                  , delta = 0.0000001
+                  , prior = priorBeta
+                  , weight = fromIntegral nSamp
+                  }))
+    qThetas <-
+      resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
+        (known $
+         N
+           ((defaultDirichlet priorTheta)
+              { maxStep = globalMaxStep
+              , delta = 0.000001
+              , dist = dirichlet startTh
+              , weight = fromIntegral nSamp
+              }))
+    xProp <- known $ N $ defaultObs xs
+    -- (\tP bPs xP ->
+    --    watch tP $ \(N theta') ->
+    --      with xP $ \(N xs') -> do
+    --        betas' <- VM.new (V.length bPs)
+    --        V.imapM_ (\i bP -> with bP $ \(N b) -> VM.write betas' i b) bPs
+    --        (upTh, upB) <-
+    --          mixedLike nSamp 1.0 gen1 xs' theta' =<< V.unsafeFreeze betas' -- xs'
+    --        V.mapM_ (uncurry write) $ V.zip bPs upB
+    --        write tP upTh)
+    (\tP bP0s xP ->
+       watch tP $ \(N theta') ->
+         with xP $ (\(N xs') -> do
+           bPs <- V.mapM (\b0 -> known =<< unsafeContent b0) bP0s -- might want to restart time, etc.
+           watch (bPs V.! (V.length bP0s - 1)) (\_b -> do
+             betas' <- VM.new (V.length bPs)
+             V.imapM_ (\i bP -> with bP $ \(N b) -> VM.write betas' i b) bPs
+             (_upTh, upB) <-
+               mixedLike nSamp 1.0 gen1 xs' theta' =<< V.unsafeFreeze betas' -- xs'
+             V.mapM_ (uncurry write) $ V.zip bPs upB)
+           bPsNew <- V.mapM (\bN -> unsafeContent bN) bPs
+           V.mapM_ (uncurry write) $ V.zip bP0s bPsNew))
+      qThetas
+      qBetas
+      xProp
+    (\tP0 bPs xP ->
+       watch (bPs V.! 0) $ \bp0 ->
+         with xP $ (\(N xs') -> do
+           betasTemp <- VM.new (V.length bPs)
+           V.imapM_ (\i bP -> with bP $ \(N b) -> VM.write betasTemp i b) bPs
+           betas' <- V.unsafeFreeze betasTemp
+           tP <- known =<< unsafeContent tP0
+           watch tP0 $ (\(N theta') -> do
+             (upTh, _upB) <-
+               mixedLikeScore nSamp 1.0 gen1 xs' theta' betas'
+             write tP upTh)
+           tPNew <- unsafeContent tP
+           write tP0 tPNew))
+      qThetas
+      qBetas
+      xProp
+    (N thetaF) <- fromMaybe (error "impos") <$> content qThetas
+    betaF <- V.mapM ((fromPropNode <$>) . unsafeContent) qBetas
+    return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
+
+unsafeContent = (fromMaybe (error "impos") <$>) . content
 
 someFunc :: IO ()
 someFunc = do
