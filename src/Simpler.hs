@@ -47,7 +47,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 1000 -- 4664 -- 100000
+globalMaxStep = 10000000 -- 4664 -- 100000
 
 type Samples = V.Vector
 
@@ -376,7 +376,8 @@ mixedFit xs =
          with xP $ \(N xs') -> do
            betas' <- VM.new (V.length bPs)
            V.imapM_ (\i bP -> with bP $ \(N b) -> VM.write betas' i b) bPs
-           (upTh, upB) <- mixedLike nSamp 1.0 gen1 xs' theta' =<< V.unsafeFreeze betas' -- xs'
+           (upTh, upB) <-
+             mixedLike nSamp 1.0 gen1 xs' theta' =<< V.unsafeFreeze betas' -- xs'
            V.mapM_ (uncurry write) $ V.zip bPs upB
            write tP upTh)
       qThetas
@@ -419,6 +420,37 @@ mixedLike nSamp std gen xsN thetaN betasN = do
            gradientReparam
              d
              (fromIntegral nSamp, V.map (V.! i) gradLikes, betaSamples))
+        betasN)
+  where
+    logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
+    -- obs = xsN
+    xs = dist xsN
+    theta = dist thetaN
+    betas = V.map dist betasN
+
+mixedLikeScore nSamp std gen xsN thetaN betasN = do
+  obs <- V.replicateM nSamp (resample xs gen)
+  thetaSamp <- V.replicateM nSamp (resample theta gen)
+  betaSamples <- V.replicateM nSamp (V.mapM (\b -> resample b gen) betas)
+  let likes =
+        V.zipWith
+          (\bs th ->
+             V.sum $
+             V.map
+               (\x ->
+                  logSum
+                    (V.map log th)
+                    (V.map (\mu -> logProb (normalDistr mu std) x) bs))
+               (obs :: V.Vector Double))
+          betaSamples
+          thetaSamp
+  return $
+    ( gradientScore thetaN (fromIntegral nSamp, likes, thetaSamp)
+    , V.imap
+        (\i d ->
+           gradientScore
+             d
+             (fromIntegral nSamp, likes, V.map (V.! i) betaSamples))
         betasN)
   where
     logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
