@@ -46,7 +46,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 maxStep :: Time
-maxStep = 100000 -- 4664 -- 100000
+maxStep = 1000 -- 4664 -- 100000
 
 type Samples = V.Vector
 
@@ -368,25 +368,27 @@ mixedFit xs =
   runST $ do
     genG <- create
     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
-    let priorTheta = Diri (V.fromList [1.0, 1.0])
+    let priorTheta = Diri (V.fromList [0.1, 0.1])
     let priorBeta = normalDistr 0.0 1.0
     let nSamp = 100
     let alpha = 0.1 -- from kuckelbier et al
-    let eta = 100 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     let tau = 1.0
     let eps = 1e-16 -- (fromIntegral $ V.length xs)
     let xDist = (O xs)
     let nClusters = 2
-    qBetas <- V.replicateM nClusters
-      (do
+    qBetas <- V.generateM nClusters
+      (\i -> do
+          let mu = if i == 0 then negate 2 else 2
+          -- mu <- MWCD.standard gen1
           known $
            N
             (Node
                1
                (normalDistr 0 0)
                (fromIntegral nSamp)
-               (normalDistr 0.0 2.0)
-               priorBeta
+               (normalDistr mu 2.0)
+               (normalDistr mu 1.0)
                (rho alpha eta tau eps)))
     qThetas <-
       (known $
@@ -394,8 +396,8 @@ mixedFit xs =
             (Node
                1
                (dirichlet $ V.replicate nClusters 0.0)
-               (fromIntegral (nSamp * nClusters))
-               (dirichlet $ V.replicate nClusters 1.0)
+               (fromIntegral (nSamp))
+               (dirichlet $ V.replicate nClusters 0.1)
                priorTheta
                (rho alpha eta tau eps)))
     xProp <-
@@ -423,25 +425,29 @@ mixedFit xs =
     betaF <- V.mapM ((fromPropNode . fromMaybe (error "impos") <$>) . content) qBetas
     return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
 
-
+genNormal :: ST s (V.Vector Double)
 genNormal = do
   gen <- create
   xs <- V.replicateM 1000 (resample (normalDistr (5.0 :: Double) 3.0) gen)
   return xs
 
+genMixture :: ST s (V.Vector Double)
 genMixture = do
   gen <- create
   let theta' = MWCD.categorical (V.fromList [5.0, 10.0]) gen
   let std = 1.0
   let mixtures =
         V.fromList
-          [MWCD.normal 2.0 std gen :: IO Double, MWCD.normal (-2.0) std gen]
+          [MWCD.normal 2.0 std gen, MWCD.normal (-2.0) std gen]
   xs <- V.replicateM 1000 ((mixtures V.!) =<< theta')
   return xs
 
 someFunc :: IO ()
 someFunc = do
-  let xs = runST $ genNormal
-  putStrLn (show $ normalFit xs)
+  -- let xs = runST $ genNormal
+  -- putStrLn (show $ normalFit xs)
+  let xs = runST $ genMixture
+  putStrLn $ unlines $ V.toList $ V.map show xs
+  putStrLn (show $ mixedFit xs)
 -- >>> someFunc
 --
