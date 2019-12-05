@@ -50,7 +50,7 @@ globalMaxStep :: Time
 globalMaxStep = 1000
 
 globalDelta :: Double
-globalDelta = 0.00000001
+globalDelta = 1e-16
 
 globalEta :: Double
 globalEta = 0.1
@@ -75,7 +75,7 @@ type PropNodes a b = V.Vector (PropNode a b)
 -- fromPropNode (U _ _) = error "called from prop node on update"
 
 instance DistUtil a => Propagated (PropNode a Double) where
-  merge node@(Node{..}) (U {..})
+  merge node@(Node {..}) (U {..})
     | norm gradientUpdate < delta = Change False node -- 0.00001
     | time >= maxStep = Change False node
     | otherwise = Change True updateNode
@@ -91,10 +91,10 @@ instance DistUtil a => Propagated (PropNode a Double) where
   merge (U _ _) _ = Contradiction mempty "Trying to update a gradient"
   -- | CAREFUL: below is dangerous if I start doing the ideas i thought
   -- about: changing maxstep and elta node for local optmizations
-  merge node1@(Node{}) node2@(Node{})
+  merge node1@(Node {}) node2@(Node {})
     | (time node2 > time node1) ||
         (norm (zipDist (-) (dist node1) (dist node2)) >= (delta node1)) =
-      Change True  node2
+      Change True (node2 {maxStep = (maxStep node1), time = (time node1 + 1)})
     | otherwise = Change False node1
 
 instance DistUtil a => Propagated (PropNodes a Double) where
@@ -464,7 +464,7 @@ mixedFit xs =
              (defaultNormalDist
                 { dist = normalDistr mu 1.0
                 , maxStep = globalMaxStep
-                , delta = 0.0000001
+                , delta = globalDelta -- 0.0000001
                 , prior = priorBeta
                 , weight = fromIntegral nSamp
                 }))
@@ -473,7 +473,7 @@ mixedFit xs =
         (known $
          ((defaultDirichlet priorTheta)
             { maxStep = globalMaxStep
-            , delta = 0.0000001
+            , delta = globalDelta -- 0.0000001
             , dist = dirichlet startTh
             , weight = fromIntegral nSamp
             }))
