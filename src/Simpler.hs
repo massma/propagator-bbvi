@@ -46,7 +46,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 maxStep :: Time
-maxStep = 1000 -- 4664 -- 100000
+maxStep = 10 -- 4664 -- 100000
 
 type Samples = V.Vector
 
@@ -108,7 +108,7 @@ instance Dist Dirichlet (V.Vector Double) where
     V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) diri cat) -
     logB (Diri diri)
   paramGradOfLogQ (Diri diri) cat =
-    Diri $ V.zipWith (\a x -> summed - digamma a + a * log x) diri cat
+    Diri $ V.zipWith (\a x -> summed - digamma a + log x) diri cat
     where
       summed = digamma (V.sum cat)
 
@@ -283,44 +283,6 @@ normalLikeAD2 nSamp std gen (xsN, qN) = do
     xs = dist xsN
     q = dist qN
 
-mixedLike nSamp std gen xsN thetaN betasN = do
-  obs <- V.replicateM nSamp (resample xs gen)
-  thetaSamp <- V.replicateM nSamp (resample theta gen)
-  betaSamples <- V.replicateM nSamp (epsilon (betas V.! 0) gen)
-  let (likes, gradLikes) =
-        V.unzip $
-        V.zipWith
-          (\eps th ->
-             V.foldl1' (\(x1, y1) (x2, y2) -> (x1 + x2, V.zipWith (+) y1 y2)) $
-             V.map
-               (\x ->
-                  grad'
-                    (\bs ->
-                       logSum
-                         (V.map (auto . log) th)
-                         (V.map
-                            (\mu ->
-                               diffableLogProb
-                                 (normalDistr mu (auto std))
-                                 (auto x))
-                            bs))
-                    (V.map (\d -> transform d eps) betas))
-               (obs :: V.Vector Double))
-          betaSamples
-          thetaSamp
-  return $
-    ( gradientScore thetaN (fromIntegral nSamp, likes, thetaSamp)
-    , V.imap
-        (\i d ->
-           gradientReparam
-             d
-             (fromIntegral nSamp, V.map (V.! i) gradLikes, betaSamples))
-        betasN)
-  where
-    logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
-    xs = dist xsN
-    theta = dist thetaN
-    betas = V.map dist betasN
 
 normalFit xs =
   runST $ do
@@ -414,7 +376,7 @@ mixedFit xs =
        watch tP $ \(N theta') ->
         with xP $ \(N xs') -> do
            betasP <- V.mapM ((fromPropNode . fromMaybe (error "impos") <$>) . content) bPs
-           (upTh, upB) <- mixedLike nSamp 1.0 gen1 xs' theta' betasP
+           (upTh, upB) <- mixedLike nSamp 1.0 gen1 xs theta' betasP -- xs'
            V.mapM_ (uncurry write) $ V.zip bPs upB
            write tP upTh)
       qThetas
@@ -424,6 +386,46 @@ mixedFit xs =
     (N thetaF) <- fromMaybe (error "impos") <$> content qThetas
     betaF <- V.mapM ((fromPropNode . fromMaybe (error "impos") <$>) . content) qBetas
     return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
+
+mixedLike nSamp std gen xsN thetaN betasN = do
+  -- obs <- V.replicateM nSamp (resample xs gen)
+  thetaSamp <- V.replicateM nSamp (resample theta gen)
+  betaSamples <- V.replicateM nSamp (epsilon (betas V.! 0) gen)
+  let (likes, gradLikes) =
+        V.unzip $
+        V.zipWith
+          (\eps th ->
+             V.foldl1' (\(x1, y1) (x2, y2) -> (x1 + x2, V.zipWith (+) y1 y2)) $
+             V.map
+               (\x ->
+                  grad'
+                    (\bs ->
+                       logSum
+                         (V.map (auto . log) th)
+                         (V.map
+                            (\mu ->
+                               diffableLogProb
+                                 (normalDistr mu (auto std))
+                                 (auto x))
+                            bs))
+                    (V.map (\d -> transform d eps) betas))
+               (obs :: V.Vector Double))
+          betaSamples
+          thetaSamp
+  return $
+    ( gradientScore thetaN (fromIntegral nSamp, likes, thetaSamp)
+    , V.imap
+        (\i d ->
+           gradientReparam
+             d
+             (fromIntegral nSamp, V.map (V.! i) gradLikes, betaSamples))
+        betasN)
+  where
+    logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
+    obs = xsN
+    -- xs = dist xsN
+    theta = dist thetaN
+    betas = V.map dist betasN
 
 genNormal :: ST s (V.Vector Double)
 genNormal = do
