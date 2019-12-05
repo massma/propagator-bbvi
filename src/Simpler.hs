@@ -46,7 +46,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 maxStep :: Time
-maxStep = 10 -- 4664 -- 100000
+maxStep = 10000 -- 4664 -- 100000
 
 type Samples = V.Vector
 
@@ -332,9 +332,9 @@ mixedFit xs =
     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
     let priorTheta = Diri (V.fromList [0.1, 0.1])
     let priorBeta = normalDistr 0.0 1.0
-    let nSamp = 100
+    let nSamp = 10
     let alpha = 0.1 -- from kuckelbier et al
-    let eta = 0.1 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
+    let eta = 0.01 -- 1 -- 10 -- 100 -- 0.01 -- this needs tuning
     let tau = 1.0
     let eps = 1e-16 -- (fromIntegral $ V.length xs)
     let xDist = (O xs)
@@ -376,7 +376,7 @@ mixedFit xs =
        watch tP $ \(N theta') ->
         with xP $ \(N xs') -> do
            betasP <- V.mapM ((fromPropNode . fromMaybe (error "impos") <$>) . content) bPs
-           (upTh, upB) <- mixedLike nSamp 1.0 gen1 xs theta' betasP -- xs'
+           (upTh, upB) <- mixedLike nSamp 1.0 gen1 xs' theta' betasP -- xs'
            V.mapM_ (uncurry write) $ V.zip bPs upB
            write tP upTh)
       qThetas
@@ -388,7 +388,7 @@ mixedFit xs =
     return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
 
 mixedLike nSamp std gen xsN thetaN betasN = do
-  -- obs <- V.replicateM nSamp (resample xs gen)
+  obs <- V.replicateM nSamp (resample xs gen)
   thetaSamp <- V.replicateM nSamp (resample theta gen)
   betaSamples <- V.replicateM nSamp (epsilon (betas V.! 0) gen)
   let (likes, gradLikes) =
@@ -422,8 +422,8 @@ mixedLike nSamp std gen xsN thetaN betasN = do
         betasN)
   where
     logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
-    obs = xsN
-    -- xs = dist xsN
+    -- obs = xsN
+    xs = dist xsN
     theta = dist thetaN
     betas = V.map dist betasN
 
