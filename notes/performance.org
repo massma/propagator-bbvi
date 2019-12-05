@@ -1113,3 +1113,142 @@ user	0m2.316s
 sys	0m0.176s
 
 Compilation finished at Thu Dec  5 14:32:38
+* bbvi cavi (delta = 0.0000001)
+(Diri [0.47343967031588613,0.2325503243055342],27,[1000000,196516],[ND [-0.43114203431859255,3.0716936627972076],ND [-0.25409021267803594,3.4490861429061166]])
+2,652,145,976,056 bytes allocated in the heap
+  26,623,967,592 bytes copied during GC
+     403,097,104 bytes maximum residency (90 sample(s))
+      46,672,368 bytes maximum slop
+             384 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     2561002 colls, 2561002 par   392.236s  94.141s     0.0000s    0.0344s
+  Gen  1        90 colls,    89 par    8.004s   2.727s     0.0303s    0.2638s
+
+  Parallel GC work balance: 13.47% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time  1534.512s  (1629.760s elapsed)
+  GC      time  400.240s  ( 96.868s elapsed)
+  EXIT    time    0.000s  (  0.002s elapsed)
+  Total   time  1934.752s  (1726.630s elapsed)
+
+  Alloc rate    1,728,331,857 bytes per MUT second
+
+  Productivity  79.3% of total user, 94.4% of total elapsed
+
+
+real	28m46.733s
+user	32m14.868s
+sys	3m57.048s
+
+Compilation finished at Thu Dec  5 15:05:37
+* after making node a part of prop node sum type, and adding vectorized merge
+(Diri [0.6209110818935473,0.12297069403986714],1000,[1000,1000],[ND [-2.6816947165637113,2.400464478991991],ND [2.836622019413764,2.7073122713136746]])
+   1,303,129,680 bytes allocated in the heap
+      38,524,912 bytes copied during GC
+         490,392 bytes maximum residency (15 sample(s))
+          98,672 bytes maximum slop
+               0 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0      1240 colls,  1240 par    0.304s   0.079s     0.0001s    0.0003s
+  Gen  1        15 colls,    14 par    0.024s   0.012s     0.0008s    0.0097s
+
+  Parallel GC work balance: 8.41% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    0.760s  (  0.817s elapsed)
+  GC      time    0.328s  (  0.091s elapsed)
+  EXIT    time    0.000s  (  0.011s elapsed)
+  Total   time    1.088s  (  0.921s elapsed)
+
+  Alloc rate    1,714,644,315 bytes per MUT second
+
+  Productivity  69.9% of total user, 88.7% of total elapsed
+
+
+real	0m1.025s
+user	0m1.200s
+sys	0m0.212s
+
+Compilation finished at Thu Dec  5 15:42:30
+
+* testing vectorized merge
+(Diri [0.3711075984940394,0.5077348998199782],2,[1000,1000],[ND [-2.821586689418105,2.5522227169671625],ND [2.709113755959471,2.7104526648635305]])
+   2,493,919,440 bytes allocated in the heap
+      23,632,704 bytes copied during GC
+         744,624 bytes maximum residency (6 sample(s))
+         107,376 bytes maximum slop
+               0 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0      2405 colls,  2405 par    0.388s   0.084s     0.0000s    0.0037s
+  Gen  1         6 colls,     5 par    0.004s   0.002s     0.0003s    0.0003s
+
+  Parallel GC work balance: 8.32% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    1.432s  (  1.572s elapsed)
+  GC      time    0.392s  (  0.085s elapsed)
+  EXIT    time    0.000s  (  0.003s elapsed)
+  Total   time    1.824s  (  1.661s elapsed)
+
+  Alloc rate    1,741,563,854 bytes per MUT second
+
+  Productivity  78.5% of total user, 94.7% of total elapsed
+
+
+real	0m1.759s
+user	0m1.924s
+sys	0m0.332s
+
+Compilation finished at Thu Dec  5 15:49:46
+
+* same as above, but only calculating theta or beta gradients as needed (testing lazyness ofs tate monad)
+
+(Diri [0.3711075984940394,0.5077348998199782],2,[1000,1000],[ND [-2.821586689418105,2.5522227169671625],ND [2.709113755959471,2.7104526648635305]])
+   2,465,090,640 bytes allocated in the heap
+      23,517,984 bytes copied during GC
+         766,920 bytes maximum residency (6 sample(s))
+          98,464 bytes maximum slop
+               0 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0      2375 colls,  2375 par    0.356s   0.098s     0.0000s    0.0092s
+  Gen  1         6 colls,     5 par    0.000s   0.002s     0.0003s    0.0005s
+
+  Parallel GC work balance: 7.69% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    1.532s  (  1.606s elapsed)
+  GC      time    0.356s  (  0.100s elapsed)
+  EXIT    time    0.000s  (  0.004s elapsed)
+  Total   time    1.888s  (  1.711s elapsed)
+
+  Alloc rate    1,609,066,997 bytes per MUT second
+
+  Productivity  81.1% of total user, 93.8% of total elapsed
+
+
+real	0m1.818s
+user	0m2.008s
+sys	0m0.328s
+
+Compilation finished at Thu Dec  5 15:59:21

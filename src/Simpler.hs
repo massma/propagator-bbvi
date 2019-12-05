@@ -47,7 +47,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 1000000
+globalMaxStep = 1000
 
 globalDelta :: Double
 globalDelta = 0.00000001
@@ -60,21 +60,45 @@ type Samples = V.Vector
 data PropNode a b
   = U { memoryUpdate :: !(a b)
       , gradientUpdate :: !(a b) }
-  | N (Node a b)
+  | Node { time :: !Time
+         , maxStep :: !Time
+         , delta :: !Double
+         , memory :: !(a b)
+         , weight :: !b
+         , dist :: !(a b)
+         , prior :: !(a b)
+         , rhoF :: !(a b -> PropNode a b -> (a b, a b)) }
 
-fromPropNode (N node) = node
-fromPropNode (U _ _) = error "called from prop node on update"
+type PropNodes a b = V.Vector (PropNode a b)
 
-data Node a b = Node
-  { time :: !Time
-  , maxStep :: !Time
-  , delta :: !Double
-  , memory :: !(a b)
-  , weight :: !b
-  , dist :: !(a b)
-  , prior :: !(a b)
-  , rhoF :: !(a b -> Node a b -> (a b, a b))
-  }
+-- fromPropNode (N node) = node
+-- fromPropNode (U _ _) = error "called from prop node on update"
+
+instance DistUtil a => Propagated (PropNode a Double) where
+  merge node@(Node{..}) (U {..})
+    | norm gradientUpdate < delta = Change False node -- 0.00001
+    | time >= maxStep = Change False node
+    | otherwise = Change True updateNode
+    where
+      updateNode =
+        (node
+           { time = time + 1
+           , memory = zipDist (+) memory memoryUpdate
+           , dist = newQ
+           })
+        where
+          newQ = zipDist (+) dist gradientUpdate
+  merge (U _ _) _ = Contradiction mempty "Trying to update a gradient"
+  -- | CAREFUL: below is dangerous if I start doing the ideas i thought
+  -- about: changing maxstep and elta node for local optmizations
+  merge node1@(Node{}) node2@(Node{})
+    | (time node2 > time node1) ||
+        (norm (zipDist (-) (dist node1) (dist node2)) >= (delta node1)) =
+      Change True  node2
+    | otherwise = Change False node1
+
+instance DistUtil a => Propagated (PropNodes a Double) where
+  merge nodes updates = V.sequence $ V.zipWith merge nodes updates
 
 newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
 
@@ -142,30 +166,6 @@ instance DistUtil Dirichlet where
   zipDist f (Diri x1) (Diri x2) = Diri $ V.zipWith f x1 x2
   norm (Diri x1) = normVec x1
 
-instance DistUtil a => Propagated (PropNode a Double) where
-  merge (N node) (U {..})
-    | norm gradientUpdate < (delta node) = Change False (N node) -- 0.00001
-    | time node >= (maxStep node) = Change False (N node)
-    | otherwise = Change True updateNode
-    where
-      updateNode =
-        N
-          (node
-             { time = (time node) + 1
-             , memory = zipDist (+) (memory node) memoryUpdate
-             , dist = newQ
-             })
-        where
-          newQ = zipDist (+) (dist node) gradientUpdate
-  merge (U _ _) _ = Contradiction mempty "Trying to update a gradient"
-  -- | CAREFUL: below is dangerous if I start doing the ideas i thought
-  -- about: changing maxstep and elta node for local optmizations
-  merge (N node1) (N node2)
-    | (time node2 > time node1) ||
-        (norm (zipDist (-) (dist node1) (dist node2)) >= (delta node1)) =
-      Change True (N node2)
-    | otherwise = Change False (N node1)
-
 newtype NormalDist a = ND (V.Vector a) deriving (Show, Eq, Ord, Read)
 
 defaultNormalDist =
@@ -224,7 +224,7 @@ instance Dist NormalDist Double where
 
 gradientScore ::
      Dist a c
-  => Node a Double
+  => PropNode a Double
   -> (Double, V.Vector Double, Samples c)
   -> PropNode a Double
 gradientScore = gradient f
@@ -249,7 +249,7 @@ gradient f q@(Node{..}) (nFactors, like, samples) =
 -- | TODO: speed up by calc length in one pass
 gradientReparam ::
      (DistUtil a, Differentiable a)
-  => Node a Double
+  => PropNode a Double
   -> (Double, V.Vector Double, Samples Double)
   -> PropNode a Double
 gradientReparam = gradient f
@@ -338,26 +338,24 @@ normalFit xs =
     genG <- create
     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
     let nSamp = 100
-    xProp <- known $ N $ defaultObs xs
+    xProp <- known $ defaultObs xs
     q <-
       known $
-      N
-        (defaultNormalDist
-           { prior = normalDistr 0.0 2.0
-           , dist = normalDistr 0.0 2.0
-           , weight = fromIntegral nSamp
-           })
+      (defaultNormalDist
+         { prior = normalDistr 0.0 2.0
+         , dist = normalDistr 0.0 2.0
+         , weight = fromIntegral nSamp
+         })
     (\qP xP ->
-       watch qP $ \(N q') ->
-         with xP $ \(N xs') ->
+       watch qP $ \q' ->
+         with xP $ \xs' ->
            normalLikeAD2 nSamp 1.0 gen1 (xs', q') >>= write q)
       q
       xProp
     -- qPropAD2 (normalLikeAD2 nSamp nSamp 1.0 gen1) (xProp, q) -- (V.length xs)
-    (N q') <- fromMaybe (error "impos") <$> content q
-    (N xs') <- fromMaybe (error "impos") <$> content xProp
+    q' <- fromMaybe (error "impos") <$> content q
+    xs' <- fromMaybe (error "impos") <$> content xProp
     return (dist q', time q', Samp.mean xs, time xs')
-
 
 mixedLike nSamp std gen xsN thetaN betasN = do
   obs <- V.replicateM nSamp (resample xs gen)
@@ -386,6 +384,45 @@ mixedLike nSamp std gen xsN thetaN betasN = do
           thetaSamp
   return $
     ( gradientScore thetaN (fromIntegral nSamp, likes, thetaSamp)
+    , V.imap
+        (\i d ->
+           gradientReparam
+             d
+             (fromIntegral nSamp, V.map (V.! i) gradLikes, betaSamples))
+        betasN)
+  where
+    logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
+    -- obs = xsN
+    xs = dist xsN
+    theta = dist thetaN
+    betas = V.map dist betasN
+
+mixedLikeOnlyBeta nSamp std gen xsN thetaN betasN = do
+  obs <- V.replicateM nSamp (resample xs gen)
+  thetaSamp <- V.replicateM nSamp (resample theta gen)
+  betaSamples <- V.replicateM nSamp (epsilon (betas V.! 0) gen)
+  let gradLikes =
+        V.zipWith
+          (\eps th ->
+             V.foldl1' (V.zipWith (+)) $
+             V.map
+               (\x ->
+                  grad
+                    (\bs ->
+                       logSum
+                         (V.map (auto . log) th)
+                         (V.map
+                            (\mu ->
+                               diffableLogProb
+                                 (normalDistr mu (auto std))
+                                 (auto x))
+                            bs))
+                    (V.map (\d -> transform d eps) betas))
+               (obs :: V.Vector Double))
+          betaSamples
+          thetaSamp
+  return $
+    ( U (dirichlet V.empty, dirichlet V.empty)
     , V.imap
         (\i d ->
            gradientReparam
@@ -430,6 +467,32 @@ mixedLikeScore nSamp std gen xsN thetaN betasN = do
     theta = dist thetaN
     betas = V.map dist betasN
 
+mixedLikeOnlyTheta nSamp std gen xsN thetaN betasN = do
+  obs <- V.replicateM nSamp (resample xs gen)
+  thetaSamp <- V.replicateM nSamp (resample theta gen)
+  betaSamples <- V.replicateM nSamp (V.mapM (\b -> resample b gen) betas)
+  let likes =
+        V.zipWith
+          (\bs th ->
+             V.sum $
+             V.map
+               (\x ->
+                  logSum
+                    (V.map log th)
+                    (V.map (\mu -> logProb (normalDistr mu std) x) bs))
+               (obs :: V.Vector Double))
+          betaSamples
+          thetaSamp
+  return $
+    ( gradientScore thetaN (fromIntegral nSamp, likes, thetaSamp)
+    , V.empty)
+  where
+    logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
+    -- obs = xsN
+    xs = dist xsN
+    theta = dist thetaN
+    betas = V.map dist betasN
+
 genNormal :: ST s (V.Vector Double)
 genNormal = do
   gen <- create
@@ -456,72 +519,68 @@ mixedFit xs =
     let nSamp = 10
     let nClusters = 2
     qBetas <-
+      known =<<
       V.generateM
         nClusters
         (\_i -> do
            mu <- resample priorBeta gen1
-           known $
-             N
-               (defaultNormalDist
-                  { dist = normalDistr mu 1.0
-                  , maxStep = globalMaxStep
-                  , delta = 0.0000001
-                  , prior = priorBeta
-                  , weight = fromIntegral nSamp
-                  }))
+           return
+             (defaultNormalDist
+                { dist = normalDistr mu 1.0
+                , maxStep = globalMaxStep
+                , delta = 0.0000001
+                , prior = priorBeta
+                , weight = fromIntegral nSamp
+                }))
     qThetas <-
       resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
         (known $
-         N
-           ((defaultDirichlet priorTheta)
-              { maxStep = globalMaxStep
-              , delta = 0.000001
-              , dist = dirichlet startTh
-              , weight = fromIntegral nSamp
-              }))
-    xProp <- known $ N $ defaultObs xs
+         ((defaultDirichlet priorTheta)
+            { maxStep = globalMaxStep
+            , delta = 0.0000001
+            , dist = dirichlet startTh
+            , weight = fromIntegral nSamp
+            }))
+    xProp <- known $ defaultObs xs
     -- (\tP bPs xP ->
-    --    watch tP $ \(N theta') ->
-    --      with xP $ \(N xs') -> do
-    --        betas' <- VM.new (V.length bPs)
-    --        V.imapM_ (\i bP -> with bP $ \(N b) -> VM.write betas' i b) bPs
-    --        (upTh, upB) <-
-    --          mixedLike nSamp 1.0 gen1 xs' theta' =<< V.unsafeFreeze betas' -- xs'
-    --        V.mapM_ (uncurry write) $ V.zip bPs upB
-    --        write tP upTh)
-    (\tP bP0s xP ->
-       watch tP $ \(N theta') ->
-         with xP $ (\(N xs') -> do
-           bPs <- V.mapM (\b0 -> known =<< unsafeContent b0) bP0s -- might want to restart time, etc.
-           watch (bPs V.! (V.length bP0s - 1)) (\_b -> do
-             betas' <- VM.new (V.length bPs)
-             V.imapM_ (\i bP -> with bP $ \(N b) -> VM.write betas' i b) bPs
-             (_upTh, upB) <-
-               mixedLike nSamp 1.0 gen1 xs' theta' =<< V.unsafeFreeze betas' -- xs'
-             V.mapM_ (uncurry write) $ V.zip bPs upB)
-           bPsNew <- V.mapM (\bN -> unsafeContent bN) bPs
-           V.mapM_ (uncurry write) $ V.zip bP0s bPsNew))
+    --    watch tP $ \theta' ->
+    --      with xP $ \xs' ->
+    --        with bPs $ \betas' -> do
+    --          (upTh, upB) <-
+    --            mixedLike nSamp 1.0 gen1 xs' theta' betas'
+    --          write bPs upB
+    --          write tP upTh)
+    --   qThetas
+    --   qBetas
+    --   xProp
+    (\tP bPs0 xP ->
+       watch tP $ \theta' ->
+         with xP $ (\xs' -> do
+            bPs <- known =<< unsafeContent bPs0
+            watch bPs $ \betas' -> do
+                 (_upTh, upB) <-
+                   mixedLikeOnlyBeta nSamp 1.0 gen1 xs' theta' betas'
+                 write bPs upB
+            bPsNew <- unsafeContent bPs
+            write bPs0 bPsNew))
       qThetas
       qBetas
       xProp
     (\tP0 bPs xP ->
-       watch (bPs V.! 0) $ \bp0 ->
-         with xP $ (\(N xs') -> do
-           betasTemp <- VM.new (V.length bPs)
-           V.imapM_ (\i bP -> with bP $ \(N b) -> VM.write betasTemp i b) bPs
-           betas' <- V.unsafeFreeze betasTemp
-           tP <- known =<< unsafeContent tP0
-           watch tP0 $ (\(N theta') -> do
-             (upTh, _upB) <-
-               mixedLikeScore nSamp 1.0 gen1 xs' theta' betas'
-             write tP upTh)
-           tPNew <- unsafeContent tP
-           write tP0 tPNew))
+       watch bPs $ \betas' ->
+         with xP $ (\xs' -> do
+            tP <- known =<< unsafeContent tP0
+            watch tP0 $
+              (\theta' -> do
+                 (upTh, _upB) <- mixedLikeOnlyTheta nSamp 1.0 gen1 xs' theta' betas'
+                 write tP upTh)
+            tPNew <- unsafeContent tP
+            write tP0 tPNew))
       qThetas
       qBetas
       xProp
-    (N thetaF) <- fromMaybe (error "impos") <$> content qThetas
-    betaF <- V.mapM ((fromPropNode <$>) . unsafeContent) qBetas
+    thetaF <- unsafeContent qThetas
+    betaF <- unsafeContent qBetas
     return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
 
 unsafeContent = (fromMaybe (error "impos") <$>) . content
