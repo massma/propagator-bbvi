@@ -397,44 +397,6 @@ mixedLike nSamp std gen xsN thetaN betasN = do
     theta = dist thetaN
     betas = V.map dist betasN
 
-mixedLikeOnlyBeta nSamp std gen xsN thetaN betasN = do
-  obs <- V.replicateM nSamp (resample xs gen)
-  thetaSamp <- V.replicateM nSamp (resample theta gen)
-  betaSamples <- V.replicateM nSamp (epsilon (betas V.! 0) gen)
-  let gradLikes =
-        V.zipWith
-          (\eps th ->
-             V.foldl1' (V.zipWith (+)) $
-             V.map
-               (\x ->
-                  grad
-                    (\bs ->
-                       logSum
-                         (V.map (auto . log) th)
-                         (V.map
-                            (\mu ->
-                               diffableLogProb
-                                 (normalDistr mu (auto std))
-                                 (auto x))
-                            bs))
-                    (V.map (\d -> transform d eps) betas))
-               (obs :: V.Vector Double))
-          betaSamples
-          thetaSamp
-  return $
-    ( U (dirichlet V.empty, dirichlet V.empty)
-    , V.imap
-        (\i d ->
-           gradientReparam
-             d
-             (fromIntegral nSamp, V.map (V.! i) gradLikes, betaSamples))
-        betasN)
-  where
-    logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
-    -- obs = xsN
-    xs = dist xsN
-    theta = dist thetaN
-    betas = V.map dist betasN
 
 mixedLikeScore nSamp std gen xsN thetaN betasN = do
   obs <- V.replicateM nSamp (resample xs gen)
@@ -460,32 +422,6 @@ mixedLikeScore nSamp std gen xsN thetaN betasN = do
              d
              (fromIntegral nSamp, likes, V.map (V.! i) betaSamples))
         betasN)
-  where
-    logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
-    -- obs = xsN
-    xs = dist xsN
-    theta = dist thetaN
-    betas = V.map dist betasN
-
-mixedLikeOnlyTheta nSamp std gen xsN thetaN betasN = do
-  obs <- V.replicateM nSamp (resample xs gen)
-  thetaSamp <- V.replicateM nSamp (resample theta gen)
-  betaSamples <- V.replicateM nSamp (V.mapM (\b -> resample b gen) betas)
-  let likes =
-        V.zipWith
-          (\bs th ->
-             V.sum $
-             V.map
-               (\x ->
-                  logSum
-                    (V.map log th)
-                    (V.map (\mu -> logProb (normalDistr mu std) x) bs))
-               (obs :: V.Vector Double))
-          betaSamples
-          thetaSamp
-  return $
-    ( gradientScore thetaN (fromIntegral nSamp, likes, thetaSamp)
-    , V.empty)
   where
     logSum v1 = V.sum . V.map exp . V.zipWith (+) v1
     -- obs = xsN
@@ -559,7 +495,7 @@ mixedFit xs =
             bPs <- known =<< unsafeContent bPs0
             watch bPs $ \betas' -> do
                  (_upTh, upB) <-
-                   mixedLikeOnlyBeta nSamp 1.0 gen1 xs' theta' betas'
+                   mixedLike nSamp 1.0 gen1 xs' theta' betas'
                  write bPs upB
             bPsNew <- unsafeContent bPs
             write bPs0 bPsNew))
@@ -572,7 +508,7 @@ mixedFit xs =
             tP <- known =<< unsafeContent tP0
             watch tP0 $
               (\theta' -> do
-                 (upTh, _upB) <- mixedLikeOnlyTheta nSamp 1.0 gen1 xs' theta' betas'
+                 (upTh, _upB) <- mixedLikeScore nSamp 1.0 gen1 xs' theta' betas'
                  write tP upTh)
             tPNew <- unsafeContent tP
             write tP0 tPNew))
