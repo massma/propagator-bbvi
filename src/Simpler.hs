@@ -47,13 +47,13 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 1000
+globalMaxStep = 1000000
 
 globalDelta :: Double
 globalDelta = 1e-16
 
 globalEta :: Double
-globalEta = 0.1
+globalEta =  0.1 --10.0
 
 type Samples = V.Vector
 
@@ -160,7 +160,7 @@ instance Dist Dirichlet (V.Vector Double) where
   paramGradOfLogQ (Diri diri) cat =
     Diri $ V.zipWith (\a x -> summed - digamma a + log x) diri cat
     where
-      summed = digamma (V.sum cat)
+      summed = digamma (V.sum diri)
 
 instance DistUtil Dirichlet where
   zipDist f (Diri x1) (Diri x2) = Diri $ V.zipWith f x1 x2
@@ -281,16 +281,6 @@ data KucP = KucP
 
 -- | eta is what you probably want to tune: kucukelbir trys 0.01 0.1 1 10 100
 defaultKucP = KucP {alpha = 0.1, eta = globalEta, tau = 1.0, eps = 1e-16}
-
-normalLike nSamp std gen xs q =
-  V.replicateM nSamp (resample q gen) >>= \samples ->
-    return
-      ( fromIntegral $ V.length xs
-      , V.map
-          (\z ->
-             V.sum $ V.map (logProb (normalDistr z std)) xs)
-          samples
-      , samples)
 
 -- normalLike2 nSamp std gen (xs, q) = do
 --   samples <- V.replicateM nSamp (resample q gen)
@@ -439,10 +429,10 @@ genMixture :: ST s (V.Vector Double)
 genMixture = do
   gen <- create
   let theta' = MWCD.categorical (V.fromList [5.0, 10.0]) gen
-  let std = 1.0
+  let std = 0.1
   let mixtures =
         V.fromList
-          [MWCD.normal 2.0 std gen, MWCD.normal (-2.0) std gen]
+          [MWCD.normal 5.0 std gen, MWCD.normal (-5.0) std gen]
   xs <- V.replicateM 1000 ((mixtures V.!) =<< theta')
   return xs
 
@@ -452,20 +442,21 @@ mixedFit xs =
     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
     let priorTheta = Diri (V.fromList [0.1, 0.1])
     let priorBeta = normalDistr 0.0 4.0
-    let nSamp = 10
+    let nSamp = 500
     let nClusters = 2
     qBetas <-
       known =<<
       V.generateM
         nClusters
-        (\_i -> do
-           mu <- resample priorBeta gen1
+        (\i -> do
+           -- mu <- resample priorBeta gen1
+           let mu = if i == 0 then 5 else (negate 5)
            return
              (defaultNormalDist
-                { dist = normalDistr mu 1.0
+                { dist = normalDistr mu (0.1 :: Double)
                 , maxStep = globalMaxStep
                 , delta = globalDelta -- 0.0000001
-                , prior = priorBeta
+                , prior = normalDistr mu (0.1 :: Double) -- priorBeta
                 , weight = fromIntegral nSamp
                 }))
     qThetas <-
@@ -489,19 +480,6 @@ mixedFit xs =
     --   qThetas
     --   qBetas
     --   xProp
-    (\tP bPs0 xP ->
-       watch tP $ \theta' ->
-         with xP $ (\xs' -> do
-            bPs <- known =<< unsafeContent bPs0
-            watch bPs $ \betas' -> do
-                 (_upTh, upB) <-
-                   mixedLike nSamp 1.0 gen1 xs' theta' betas'
-                 write bPs upB
-            bPsNew <- unsafeContent bPs
-            write bPs0 bPsNew))
-      qThetas
-      qBetas
-      xProp
     (\tP0 bPs xP ->
        watch bPs $ \betas' ->
          with xP $ (\xs' -> do
@@ -515,18 +493,80 @@ mixedFit xs =
       qThetas
       qBetas
       xProp
+    -- (\tP bPs0 xP ->
+    --    watch tP $ \theta' ->
+    --      with xP $ (\xs' -> do
+    --         bPs <- known =<< unsafeContent bPs0
+    --         watch bPs $ \betas' -> do
+    --              (_upTh, upB) <-
+    --                mixedLike nSamp 1.0 gen1 xs' theta' betas'
+    --              write bPs upB
+    --         bPsNew <- unsafeContent bPs
+    --         write bPs0 bPsNew))
+    --   qThetas
+    --   qBetas
+    --   xProp
     thetaF <- unsafeContent qThetas
     betaF <- unsafeContent qBetas
     return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
 
 unsafeContent = (fromMaybe (error "impos") <$>) . content
 
+genDirichlet = do
+  gen <- create
+  xs <-
+    V.replicateM
+      1000
+      (resample (dirichlet (V.fromList [10.0, 20.0])) gen >>= \cat ->
+         MWCD.categorical (cat :: V.Vector Double) gen)
+  return (xs :: V.Vector Int)
+
+dirichletFit xs =
+  runST $ do
+    genG <- create
+    gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+    let priorTheta = Diri (V.fromList [1.0, 1.0])
+    let nSamp = 500
+    let nClusters = 2
+    qTheta <-
+      resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
+        (known $
+         ((defaultDirichlet priorTheta)
+            { maxStep = globalMaxStep
+            , delta = globalDelta -- 0.0000001
+            , dist = dirichlet startTh
+            , weight = 1
+            }))
+    (\tP ->
+       watch tP $ \theta' -> do
+        upTh <- dirichletLike nSamp gen1 xs theta'
+        write tP upTh)
+      qTheta
+    thetaF <- unsafeContent qTheta
+    return (dist thetaF, time thetaF)
+
+dirichletLike nSamp gen xs diriQ =
+  V.replicateM nSamp (resample diri gen) >>= \samples ->
+    return $
+      gradientScore
+        diriQ
+        ( 1
+        , V.map
+          (\z ->
+             V.sum $ V.map (\i -> log (z V.! i)) xs)
+          samples
+        , samples)
+  where
+    diri = dist diriQ
+
 someFunc :: IO ()
 someFunc = do
   -- let xs = runST $ genNormal
   -- putStrLn (show $ normalFit xs)
-  let xs = runST $ genMixture
+  -- let xs = runST $ genMixture
   -- putStrLn $ unlines $ V.toList $ V.map show xs
-  putStrLn (show $ mixedFit xs)
+  -- putStrLn (show $ mixedFit xs)
+  let xs = runST $ genDirichlet
+  putStrLn (show $ dirichletFit xs)
 -- >>> someFunc
 --
