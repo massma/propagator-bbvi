@@ -114,6 +114,7 @@ instance DistUtil a => Propagated (PropNode a Double) where
   -- | CAREFUL: below is dangerous if I start doing the ideas i thought
   -- about: changing maxstep and elta node for local optmizations
   merge node1@(Node {}) node2@(Node {})
+    | time node1 >= maxStep node1 = Change False node1
     | (time node2 > time node1) ||
         (norm (zipDist (-) (dist node1) (dist node2)) >= (delta node1)) =
       Change True (node2 {maxStep = (maxStep node1), time = (time node1 + 1)})
@@ -375,69 +376,6 @@ mixedLikeScore nSamp nObs std gen xsN thetaN betasN = do
     theta = dist thetaN
     betas = V.map dist betasN
 
-mixedLikeOnlyBeta nSamp nObs std gen xsN thetaN betasN = do
-  obs <- V.replicateM nObs (resample xs gen)
-  thetaSamp <- V.replicateM nSamp (resample theta gen)
-  betaSamples <- V.replicateM nSamp (epsilon (betas V.! 0) gen)
-  let gradLikes =
-        V.zipWith
-          (\eps th ->
-             V.foldl1' (V.zipWith (+)) $
-             V.map
-               (\x ->
-                  grad
-                    (\bs ->
-                       logSum
-                         (V.map (auto . log) th)
-                         (V.map
-                            (\mu ->
-                               diffableLogProb
-                                 (normalDistr mu (auto std))
-                                 (auto x))
-                            bs))
-                    (V.map (\d -> transform d eps) betas))
-               (obs :: V.Vector Double))
-          betaSamples
-          thetaSamp
-  return $
-    ( U (dirichlet V.empty, dirichlet V.empty)
-    , V.imap
-        (\i d ->
-           gradientReparam
-             d
-             (fromIntegral nSamp, V.map (V.! i) gradLikes, betaSamples))
-        betasN)
-  where
-    -- obs = xsN
-    xs = dist xsN
-    theta = dist thetaN
-    betas = V.map dist betasN
-
-mixedLikeOnlyTheta nSamp nObs std gen xsN thetaN betasN = do
-  obs <- V.replicateM nObs (resample xs gen)
-  thetaSamp <- V.replicateM nSamp (resample theta gen)
-  betaSamples <- V.replicateM nSamp (V.mapM (\b -> resample b gen) betas)
-  let likes =
-        V.zipWith
-          (\bs th ->
-             V.sum $
-             V.map
-               (\x ->
-                  logSum
-                    (V.map log th)
-                    (V.map (\mu -> logProb (normalDistr mu std) x) bs))
-               (obs :: V.Vector Double))
-          betaSamples
-          thetaSamp
-  return $
-    ( gradientScore thetaN (fromIntegral nSamp, likes, thetaSamp)
-    , V.empty)
-  where
-    -- obs = xsN
-    xs = dist xsN
-    theta = dist thetaN
-    betas = V.map dist betasN
-
 genMixture :: ST s (V.Vector Double)
 genMixture = do
   gen <- create
@@ -457,6 +395,7 @@ mixedFit xs =
     let priorBeta = normalDistr 0.0 4.0
     let nSamp = 10
     let nObs = 100
+    let localStep = 20
     let nClusters = 2
     qBetas <-
       known =<<
@@ -498,10 +437,10 @@ mixedFit xs =
     (\tP bPs0 xP ->
        watch tP $ \theta' ->
          with xP $ (\xs' -> do
-            bPs <- known =<< unsafeContent bPs0
+            bPs <- known =<< (V.map (\p -> p {maxStep = time p + localStep}) <$> unsafeContent bPs0)
             watch bPs $ \betas' -> do
                  (_upTh, upB) <-
-                   mixedLikeOnlyBeta nSamp nObs 1.0 gen1 xs' theta' betas'
+                   mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
                  write bPs upB
             bPsNew <- unsafeContent bPs
             write bPs0 bPsNew))
@@ -511,10 +450,10 @@ mixedFit xs =
     (\tP0 bPs xP ->
        watch bPs $ \betas' ->
          with xP $ (\xs' -> do
-            tP <- known =<< unsafeContent tP0
+            tP <- known =<< ((\p -> p {maxStep = time p + localStep}) <$> unsafeContent tP0)
             watch tP $
               (\theta' -> do
-                 (upTh, _upB) <- mixedLikeOnlyTheta nSamp nObs 1.0 gen1 xs' theta' betas'
+                 (upTh, _upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
                  write tP upTh)
             tPNew <- unsafeContent tP
             write tP0 tPNew))
