@@ -526,15 +526,15 @@ dirichletFit xs =
     genG <- create
     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
     let priorTheta = Diri (V.fromList [1.0, 1.0])
-    let nSamp = 500
+    let nSamp = 100
     let nClusters = 2
     qTheta <-
-      resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
+      -- resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
         (known $
          ((defaultDirichlet priorTheta)
             { maxStep = globalMaxStep
             , delta = globalDelta -- 0.0000001
-            , dist = dirichlet startTh
+            , dist = dirichlet (V.fromList [(1.0 :: Double), 1.0]) -- startTh
             , weight = 1
             }))
     (\tP ->

@@ -1252,3 +1252,71 @@ user	0m2.008s
 sys	0m0.328s
 
 Compilation finished at Thu Dec  5 15:59:21
+* fit dirichlet
+(Diri [6.853877107667254,13.033755540631176],100000)
+  34,161,171,472 bytes allocated in the heap
+   1,166,054,760 bytes copied during GC
+      31,182,952 bytes maximum residency (8 sample(s))
+         831,384 bytes maximum slop
+              29 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     32452 colls, 32452 par    8.392s   2.102s     0.0001s    0.0067s
+  Gen  1         8 colls,     7 par    0.068s   0.030s     0.0038s    0.0129s
+
+  Parallel GC work balance: 4.72% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.002s elapsed)
+  MUT     time  346.184s  (348.894s elapsed)
+  GC      time    8.460s  (  2.132s elapsed)
+  EXIT    time    0.000s  (  0.003s elapsed)
+  Total   time  354.644s  (351.031s elapsed)
+
+  Alloc rate    98,679,232 bytes per MUT second
+
+  Productivity  97.6% of total user, 99.4% of total elapsed
+
+
+real	5m51.131s
+user	5m54.748s
+sys	0m4.876s
+
+Compilation finished at Thu Dec  5 22:14:49
+* fit dirischlet long sample
+(Diri [11.059145392781117,21.319850410163703],1000000)
+ 332,993,547,184 bytes allocated in the heap
+  11,153,430,344 bytes copied during GC
+     234,804,664 bytes maximum residency (11 sample(s))
+       7,948,872 bytes maximum slop
+             223 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     316422 colls, 316422 par   86.604s  21.328s     0.0001s    0.0209s
+  Gen  1        11 colls,    10 par    0.668s   0.261s     0.0238s    0.1195s
+
+  Parallel GC work balance: 3.69% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time  3454.252s  (3484.223s elapsed)
+  GC      time   87.272s  ( 21.590s elapsed)
+  EXIT    time    0.000s  (  0.008s elapsed)
+  Total   time  3541.524s  (3505.821s elapsed)
+
+  Alloc rate    96,401,057 bytes per MUT second
+
+  Productivity  97.5% of total user, 99.4% of total elapsed
+
+
+real	58m25.919s
+user	59m1.608s
+sys	0m53.184s
+
+Compilation finished at Fri Dec  6 19:34:38
