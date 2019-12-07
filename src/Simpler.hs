@@ -30,7 +30,6 @@ import Data.Propagator
 import Control.Monad.ST
 import Data.Maybe (fromMaybe)
 import qualified Data.Vector as V
-import qualified Data.Vector.Mutable as VM
 import Numeric.AD (grad, grad', auto, diff)
 import Numeric.MathFunctions.Constants (m_sqrt_2_pi)
 import Numeric.SpecFunctions (logGamma, digamma)
@@ -69,7 +68,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 20
+globalMaxStep = 10000
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
@@ -117,7 +116,7 @@ instance DistUtil a => Propagated (PropNode a Double) where
     | time node1 >= maxStep node1 = Change False node1
     | (time node2 > time node1) ||
         (norm (zipDist (-) (dist node1) (dist node2)) >= (delta node1)) =
-      Change True (node2 {maxStep = (maxStep node1), time = (time node1 + 1)})
+      Change True (node2 {maxStep = maxStep node1, delta = delta node1})
     | otherwise = Change False node1
 
 instance DistUtil a => Propagated (PropNodes a Double) where
@@ -234,7 +233,9 @@ instance DistUtil NormalDist where
   norm (ND x) = normVec x
 
 instance Dist NormalDist Double where
-  logProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
+  logProb d x
+    | sd < 0.0 = error "negative standard dev"
+    | otherwise = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
     where
       xm = x - mean d
       sd = stdDev d
@@ -437,7 +438,7 @@ mixedFit xs =
     (\tP bPs0 xP ->
        watch tP $ \theta' ->
          with xP $ (\xs' -> do
-            bPs <- known =<< (V.map (\p -> p {maxStep = time p + localStep}) <$> unsafeContent bPs0)
+            bPs <- known =<< (V.map (initLocal localStep) <$> unsafeContent bPs0)
             watch bPs $ \betas' -> do
                  (_upTh, upB) <-
                    mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
@@ -450,7 +451,7 @@ mixedFit xs =
     (\tP0 bPs xP ->
        watch bPs $ \betas' ->
          with xP $ (\xs' -> do
-            tP <- known =<< ((\p -> p {maxStep = time p + localStep}) <$> unsafeContent tP0)
+            tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
             watch tP $
               (\theta' -> do
                  (upTh, _upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
@@ -463,6 +464,9 @@ mixedFit xs =
     thetaF <- unsafeContent qThetas
     betaF <- unsafeContent qBetas
     return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
+
+initLocal step p = p {maxStep = time p + step}
+initLocalDefault p = initLocal (maxStep p) p
 
 unsafeContent = (fromMaybe (error "impos") <$>) . content
 
