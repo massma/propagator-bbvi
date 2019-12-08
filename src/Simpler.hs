@@ -68,13 +68,13 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 2
+globalMaxStep = 10000
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
 globalEta :: Double
-globalEta =  0.01 --10.0
+globalEta =  0.1 --10.0
 
 type Samples = V.Vector
 
@@ -195,7 +195,7 @@ defaultNormalDist =
      1
      globalMaxStep
      globalDelta
-     (normalDistr 0 0)
+     (buildND 0 0)
      1
      (normalDistr 0 1)
      (normalDistr 0 1)
@@ -207,6 +207,7 @@ stdDev = exp . omega
 omega :: NormalDist a -> a
 omega (ND xs) = xs V.! 1
 normalDistr mu std = ND (V.fromList [mu, log std])
+buildND x1 x2 = ND $ V.fromList [x1, x2]
 
 instance Functor NormalDist where
   fmap f (ND v) = ND $ V.map f v
@@ -229,12 +230,12 @@ instance Differentiable NormalDist where
   transform d eps = mean d + stdDev d * eps
   epsilon _d gen = realToFrac <$> MWCD.standard gen
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
-  gradTransform d eps = ND $ V.fromList [1.0 , eps * stdDev d] -- --
+  gradTransform d eps = ND $ V.fromList [1.0, eps * stdDev d] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
 -- >>> transform (normalDistr 0.0 2.0) 1.0
--- <interactive>:2679:2-36: warning: [-Wtype-defaults]
+-- <interactive>:3222:2-36: warning: [-Wtype-defaults]
 --     • Defaulting the following constraints to type ‘Double’
---         (Show a0) arising from a use of ‘print’ at <interactive>:2679:2-36
---         (Floating a0) arising from a use of ‘it’ at <interactive>:2679:2-36
+--         (Show a0) arising from a use of ‘print’ at <interactive>:3222:2-36
+--         (Floating a0) arising from a use of ‘it’ at <interactive>:3222:2-36
 --     • In a stmt of an interactive GHCi command: print it
 -- 2.0
 
@@ -242,10 +243,10 @@ instance Differentiable NormalDist where
 -- ND [1.0,2.0]
 
 -- >>> grad (\d' -> transform d' (auto 2.0)) (normalDistr 0.0 1.0)
--- <interactive>:2603:2-60: warning: [-Wtype-defaults]
+-- <interactive>:3702:2-60: warning: [-Wtype-defaults]
 --     • Defaulting the following constraints to type ‘Double’
---         (Show a0) arising from a use of ‘print’ at <interactive>:2603:2-60
---         (Floating a0) arising from a use of ‘it’ at <interactive>:2603:2-60
+--         (Show a0) arising from a use of ‘print’ at <interactive>:3702:2-60
+--         (Floating a0) arising from a use of ‘it’ at <interactive>:3702:2-60
 --     • In a stmt of an interactive GHCi command: print it
 -- ND [1.0,2.0]
 
@@ -254,9 +255,7 @@ instance DistUtil NormalDist where
   norm (ND x) = normVec x
 
 instance Dist NormalDist Double where
-  logProb d x
-    | sd < 0.0 = error "negative standard dev"
-    | otherwise = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
+  logProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
     where
       xm = x - mean d
       sd = stdDev d
@@ -270,10 +269,10 @@ instance Dist NormalDist Double where
 -- ND [2.0,3.0]
 
 -- >>> grad (\d' -> diffableLogProb d' (auto 2.0)) (normalDistr 0.0 1.0)
--- <interactive>:1773:2-66: warning: [-Wtype-defaults]
+-- <interactive>:3855:2-66: warning: [-Wtype-defaults]
 --     • Defaulting the following constraints to type ‘Double’
---         (Show a0) arising from a use of ‘print’ at <interactive>:1773:2-66
---         (Floating a0) arising from a use of ‘it’ at <interactive>:1773:2-66
+--         (Show a0) arising from a use of ‘print’ at <interactive>:3855:2-66
+--         (Floating a0) arising from a use of ‘it’ at <interactive>:3855:2-66
 --     • In a stmt of an interactive GHCi command: print it
 -- ND [2.0,3.0]
 
@@ -460,7 +459,7 @@ mixedFit xs =
     --      with xP $ \xs' ->
     --        with bPs $ \betas' -> do
     --          (upTh, upB) <-
-    --            mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
+    --            mixedLike nSamp nObs 1.0 gen1 xs' theta' betas'
     --          write bPs upB
     --          write tP upTh)
     --   qThetas
@@ -472,29 +471,30 @@ mixedFit xs =
             bPs <- known =<< (V.map (initLocal localStep) <$> unsafeContent bPs0)
             watch bPs $ \betas' -> do
                  (_upTh, upB) <-
-                   mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
+                   mixedLike nSamp 10 1.0 gen1 xs' theta' betas'
                  write bPs upB
             bPsNew <- unsafeContent bPs
             write bPs0 bPsNew))
       qThetas
       qBetas
       xProp
-    -- (\tP0 bPs xP ->
-    --    watch bPs $ \betas' ->
-    --      with xP $ (\xs' -> do
-    --         tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
-    --         watch tP $
-    --           (\theta' -> do
-    --              (upTh, _upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
-    --              write tP upTh)
-    --         tPNew <- unsafeContent tP
-    --         write tP0 tPNew))
-    --   qThetas
-    --   qBetas
-    --   xProp
+    (\tP0 bPs xP ->
+       watch bPs $ \betas' ->
+         with xP $ (\xs' -> do
+            tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
+            watch tP $
+              (\theta' -> do
+                 (upTh, _upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
+                 write tP upTh)
+            tPNew <- unsafeContent tP
+            write tP0 tPNew))
+      qThetas
+      qBetas
+      xProp
     thetaF <- unsafeContent qThetas
     betaF <- unsafeContent qBetas
-    return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
+    let betaDists = V.map dist betaF
+    return (dist thetaF, time thetaF, V.map time betaF, V.map (\d -> (mean d, stdDev d)) betaDists)
 
 initLocal step p = p {maxStep = time p + step}
 initLocalDefault p = initLocal (maxStep p) p

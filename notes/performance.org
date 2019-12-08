@@ -242,3 +242,108 @@ sys	0m0.828s
 
 Compilation finished at Sat Dec  7 16:59:22
 ** after exp reparam
+*** optimizing each speratesly (maxstep=10000, local=20 nObs = 100, nsamp = 10)
+(Diri [1.5082990515967873,2.9352916210698874],10001,[10001,10001],[(4.893794188266194,0.17607754359201677),(-4.950963735159339,0.11982555132733487)])
+ 344,264,845,664 bytes allocated in the heap
+   6,804,611,048 bytes copied during GC
+         732,928 bytes maximum residency (1345 sample(s))
+         226,520 bytes maximum slop
+               0 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     331509 colls, 331509 par   103.388s  44.385s     0.0001s    0.0360s
+  Gen  1      1345 colls,  1344 par    1.648s   0.657s     0.0005s    0.0221s
+
+  Parallel GC work balance: 6.35% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time  285.136s  (277.005s elapsed)
+  GC      time  105.036s  ( 45.042s elapsed)
+  EXIT    time    0.000s  (  0.016s elapsed)
+  Total   time  390.172s  (322.063s elapsed)
+
+  Alloc rate    1,207,370,678 bytes per MUT second
+
+  Productivity  73.1% of total user, 86.0% of total elapsed
+
+
+real	5m22.166s
+user	6m30.288s
+sys	1m32.044s
+
+Compilation finished at Sat Dec  7 22:18:37
+
+*** same as above, but only using nObs=10 for beta update
+(Diri [1.5881921277723183,3.070365021844253],10001,[10001,10001],[(4.267905468822883,0.48721472840179064),(-4.618456548562497,0.35730828413205257)])
+  39,029,587,992 bytes allocated in the heap
+     410,866,224 bytes copied during GC
+         714,584 bytes maximum residency (116 sample(s))
+         217,088 bytes maximum slop
+               0 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     37586 colls, 37586 par    9.860s   3.899s     0.0001s    0.0230s
+  Gen  1       116 colls,   115 par    0.120s   0.041s     0.0004s    0.0022s
+
+  Parallel GC work balance: 8.98% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time   37.644s  ( 34.155s elapsed)
+  GC      time    9.980s  (  3.940s elapsed)
+  EXIT    time    0.000s  (  0.006s elapsed)
+  Total   time   47.624s  ( 38.100s elapsed)
+
+  Alloc rate    1,036,807,671 bytes per MUT second
+
+  Productivity  79.0% of total user, 89.6% of total elapsed
+
+
+real	0m38.209s
+user	0m47.748s
+sys	0m9.204s
+
+Compilation finished at Sat Dec  7 22:23:20
+
+*** using score for beta updates as well; back to nObs = 100 for both
+
+(Diri [1.492403018176988,2.7991546997820893],10001,[10001,10001],[(4.896460943020489,0.4545926836200385),(-4.889221646206157,0.3023908790875438)])
+   9,482,415,296 bytes allocated in the heap
+      98,119,752 bytes copied during GC
+         697,328 bytes maximum residency (16 sample(s))
+         214,424 bytes maximum slop
+               0 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0      9109 colls,  9109 par    2.240s   0.721s     0.0001s    0.0224s
+  Gen  1        16 colls,    15 par    0.016s   0.005s     0.0003s    0.0008s
+
+  Parallel GC work balance: 4.66% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.000s  (  0.001s elapsed)
+  MUT     time    9.552s  (  9.697s elapsed)
+  GC      time    2.256s  (  0.726s elapsed)
+  EXIT    time    0.000s  (  0.007s elapsed)
+  Total   time   11.808s  ( 10.431s elapsed)
+
+  Alloc rate    992,715,169 bytes per MUT second
+
+  Productivity  80.9% of total user, 93.0% of total elapsed
+
+
+real	0m10.574s
+user	0m11.960s
+sys	0m1.596s
+
+Compilation finished at Sat Dec  7 22:10:18
