@@ -194,9 +194,6 @@ defaultNormalDist =
 
 data NormalDist = ND {mean :: Double, stdDev :: Double} deriving (Show, Eq, Ord, Read)
 
-omega :: NormalDist -> Double
-omega = log . stdDev
-
 normalDistr mu std = ND mu std
 
 instance DistUtil NormalDist where
@@ -221,15 +218,8 @@ diffableNormalLogProb mu sd x =  (-xm * xm / (2 * sd * sd)) - ndPdfDenom
       xm = x - mu
       ndPdfDenom = log $ sqrt (2*pi) * sd
 -- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
--- ND [2.0,3.0]
+-- [2.0,3.0]
 
--- >>> grad (\d' -> diffableLogProb d' (auto 2.0)) (normalDistr 0.0 1.0)
--- <interactive>:3855:2-66: warning: [-Wtype-defaults]
---     • Defaulting the following constraints to type ‘Double’
---         (Show a0) arising from a use of ‘print’ at <interactive>:3855:2-66
---         (Floating a0) arising from a use of ‘it’ at <interactive>:3855:2-66
---     • In a stmt of an interactive GHCi command: print it
--- ND [2.0,3.0]
 
 instance Differentiable NormalDist Double where
   transform d eps = mean d + stdDev d * eps
@@ -237,23 +227,16 @@ instance Differentiable NormalDist Double where
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
   gradTransform d eps = V.fromList [1.0, eps * stdDev d] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
 -- >>> transform (normalDistr 0.0 2.0) 1.0
--- <interactive>:3222:2-36: warning: [-Wtype-defaults]
+-- <interactive>:12252:2-36: warning: [-Wtype-defaults]
 --     • Defaulting the following constraints to type ‘Double’
---         (Show a0) arising from a use of ‘print’ at <interactive>:3222:2-36
---         (Floating a0) arising from a use of ‘it’ at <interactive>:3222:2-36
+--         (Show a0) arising from a use of ‘print’ at <interactive>:12252:2-36
+--         (Fractional a0)
+--           arising from a use of ‘it’ at <interactive>:12252:2-36
 --     • In a stmt of an interactive GHCi command: print it
 -- 2.0
 
 -- >>> gradTransform (normalDistr 0.0 1.0) (2.0 :: Double)
--- ND [1.0,2.0]
-
--- >>> grad (\d' -> transform d' (auto 2.0)) (normalDistr 0.0 1.0)
--- <interactive>:3702:2-60: warning: [-Wtype-defaults]
---     • Defaulting the following constraints to type ‘Double’
---         (Show a0) arising from a use of ‘print’ at <interactive>:3702:2-60
---         (Floating a0) arising from a use of ‘it’ at <interactive>:3702:2-60
---     • In a stmt of an interactive GHCi command: print it
--- ND [1.0,2.0]
+-- [1.0,2.0]
 
 
 gradientScore ::
