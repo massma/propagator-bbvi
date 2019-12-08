@@ -158,13 +158,18 @@ defaultDirichlet prior =
      prior
      (rhoKuc defaultKucP))
 
-dirichlet = Diri
+dirichlet xs = Diri $ V.map log xs
+
+alphas :: Floating a => Dirichlet a -> V.Vector a
+alphas (Diri xs) = V.map exp xs
 
 logB :: Dirichlet Double -> Double
-logB (Diri alphas) = V.sum (V.map logGamma alphas) - logGamma (V.sum alphas)
+logB d = V.sum (V.map logGamma as) - logGamma (V.sum as)
+  where
+    as = alphas d
 
 instance Sampleable Dirichlet (V.Vector Double) where
-  resample (Diri diri) gen = MWCD.dirichlet diri gen
+  resample d gen = MWCD.dirichlet (alphas d) gen
 
 instance Functor Dirichlet where
   fmap f (Diri diri) = Diri $ V.map f diri
@@ -176,13 +181,17 @@ instance Traversable Dirichlet where
   traverse f (Diri diri) = Diri <$> traverse f diri
 
 instance Dist Dirichlet (V.Vector Double) where
-  logProb (Diri diri) cat =
-    V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) diri cat) -
-    logB (Diri diri)
-  paramGradOfLogQ (Diri diri) cat =
-    Diri $ V.zipWith (\a x -> summed - digamma a + log x) diri cat
+  logProb d cat =
+    V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) as cat) -
+    logB d
     where
-      summed = digamma (V.sum diri)
+      as = alphas d
+
+  paramGradOfLogQ d cat =
+    Diri $ V.zipWith (\a x -> a * (summed - digamma a + log x)) as cat
+    where
+      as = alphas d
+      summed = digamma (V.sum as)
 
 instance DistUtil Dirichlet where
   zipDist f (Diri x1) (Diri x2) = Diri $ V.zipWith f x1 x2
@@ -422,7 +431,7 @@ mixedFit xs =
   runST $ do
     genG <- create
     gen1 <- initialize =<< V.replicateM 256 (uniform genG)
-    let priorTheta = Diri (V.fromList [0.1, 0.1])
+    let priorTheta = dirichlet (V.fromList [0.1, 0.1])
     let priorBeta = normalDistr 0.0 4.0
     let nSamp = 10
     let nObs = 100
@@ -471,7 +480,7 @@ mixedFit xs =
             bPs <- known =<< (V.map (initLocal localStep) <$> unsafeContent bPs0)
             watch bPs $ \betas' -> do
                  (_upTh, upB) <-
-                   mixedLike nSamp 10 1.0 gen1 xs' theta' betas'
+                   mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
                  write bPs upB
             bPsNew <- unsafeContent bPs
             write bPs0 bPsNew))
@@ -494,7 +503,7 @@ mixedFit xs =
     thetaF <- unsafeContent qThetas
     betaF <- unsafeContent qBetas
     let betaDists = V.map dist betaF
-    return (dist thetaF, time thetaF, V.map time betaF, V.map (\d -> (mean d, stdDev d)) betaDists)
+    return (alphas (dist thetaF), time thetaF, V.map time betaF, V.map (\d -> (mean d, stdDev d)) betaDists)
 
 initLocal step p = p {maxStep = time p + step}
 initLocalDefault p = initLocal (maxStep p) p
