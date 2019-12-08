@@ -212,32 +212,32 @@ instance Dist NormalDist Double where
     where
       mu = mean d
       std = stdDev d
+-- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
+-- [2.0,3.0]
+-- >>> grad (\[mu, omega] -> diffableNormalLogProb mu (exp omega) (auto 2.0)) [0.0, log 1.0] :: [Double]
+-- <interactive>:12791:8-70: warning: [-Wincomplete-uni-patterns]
+--     Pattern match(es) are non-exhaustive
+--     In a lambda abstraction:
+--         Patterns not matched:
+--             []
+--             [_]
+--             (_:_:_:_)
+-- [2.0,3.0]
 
 diffableNormalLogProb mu sd x =  (-xm * xm / (2 * sd * sd)) - ndPdfDenom
     where
       xm = x - mu
       ndPdfDenom = log $ sqrt (2*pi) * sd
--- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
--- [2.0,3.0]
-
 
 instance Differentiable NormalDist Double where
   transform d eps = mean d + stdDev d * eps
   epsilon _d gen = MWCD.standard gen
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
   gradTransform d eps = V.fromList [1.0, eps * stdDev d] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
--- >>> transform (normalDistr 0.0 2.0) 1.0
--- <interactive>:12252:2-36: warning: [-Wtype-defaults]
---     • Defaulting the following constraints to type ‘Double’
---         (Show a0) arising from a use of ‘print’ at <interactive>:12252:2-36
---         (Fractional a0)
---           arising from a use of ‘it’ at <interactive>:12252:2-36
---     • In a stmt of an interactive GHCi command: print it
+-- >>> (transform (normalDistr 0.0 2.0) 1.0 :: Double)
 -- 2.0
-
 -- >>> gradTransform (normalDistr 0.0 1.0) (2.0 :: Double)
 -- [1.0,2.0]
-
 
 gradientScore ::
      Dist a c
