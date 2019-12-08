@@ -1,4 +1,5 @@
-* mixed, fitting both at once, reparam, nObs=100
+* optimzing togeher
+** mixed, fitting both at once, reparam, nObs=100
   (Diri [1.0086569635973237,1.8427299385215417],1000,[1000,1000],[ND [4.907418360802153,0.17344881531727663],ND [-4.970463524796255,0.11917355571557574]])
   12,812,693,096 bytes allocated in the heap
    1,772,069,232 bytes copied during GC
@@ -32,7 +33,7 @@ user	0m21.392s
 sys	0m6.688s
 
 Compilation finished at Sat Dec  7 15:20:24
-* as above, but nObs = 10
+** as above, but nObs = 10
 (Diri [0.9169142505889198,1.8952847833345803],1000,[1000,1000],[ND [4.260480097767227,0.4896550397756462],ND [-4.5904360185218245,0.3691979579239628]])
    1,356,290,576 bytes allocated in the heap
       41,624,456 bytes copied during GC
@@ -66,7 +67,7 @@ user	0m2.524s
 sys	0m0.684s
 
 Compilation finished at Sat Dec  7 15:23:16
-* mixed, fitting both at once, score, nObs=100
+** mixed, fitting both at once, score, nObs=100
 (Diri [0.9735863063935011,1.751558406490411],1000,[1000,1000],[ND [4.157958040015821,0.6654694515041761],ND [-4.642790860179611,0.34848542966393536]])
      407,397,584 bytes allocated in the heap
        4,502,008 bytes copied during GC
@@ -100,7 +101,7 @@ user	0m0.644s
 sys	0m0.088s
 
 Compilation finished at Sat Dec  7 15:26:07
-* as above, but maxstep=20000
+** as above, but maxstep=20000
 (Diri [1.7596579351373485,3.280324879448113],20000,[20000,20000],[ND [4.92013663421398,0.39977027116262714],ND [-4.971513243977412,0.21710460430720604]])
    7,950,771,880 bytes allocated in the heap
       90,451,888 bytes copied during GC
@@ -134,7 +135,9 @@ user	0m10.192s
 sys	0m0.968s
 
 Compilation finished at Sat Dec  7 15:27:36
-* optimizing each speratesly (maxstep=10000, local=20 nObs = 100, nsamp = 10)
+* optimizing separately
+** before exp reparam
+*** optimizing each speratesly (maxstep=10000, local=20 nObs = 100, nsamp = 10)
 (Diri [1.5488481570205452,2.9551659896189126],10001,[10001,10001],[ND [4.926956215707551,0.17557462460153705],ND [-4.958529545602285,0.11801031853808713]])
  262,750,859,936 bytes allocated in the heap
    4,739,236,544 bytes copied during GC
@@ -169,7 +172,7 @@ sys	0m36.568s
 
 Compilation finished at Sat Dec  7 16:52:54
 
-* same as above, but only using nObs=10 for beta updates
+*** same as above, but only using nObs=10 for beta updates
 (Diri [1.5205154557097293,2.9650397484592865],10001,[10001,10001],[ND [4.260050384923124,0.49250786470144864],ND [-4.617828959585075,0.36165250390702197]])
   30,051,714,936 bytes allocated in the heap
      282,485,752 bytes copied during GC
@@ -204,7 +207,7 @@ sys	0m3.272s
 
 Compilation finished at Sat Dec  7 16:57:50
 
-* using score for beta updates as well; back to nObs = 100 for both
+*** using score for beta updates as well; back to nObs = 100 for both
 (Diri [1.4636021791615712,2.963185554481429],10001,[10001,10001],[ND [4.783571405684002,0.4057888967842293],ND [-4.9402131925959125,0.20997279622922638]])
    7,805,779,920 bytes allocated in the heap
       84,245,576 bytes copied during GC
@@ -238,3 +241,4 @@ user	0m9.060s
 sys	0m0.828s
 
 Compilation finished at Sat Dec  7 16:59:22
+** after exp reparam

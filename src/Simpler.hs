@@ -68,7 +68,7 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 10000
+globalMaxStep = 1
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
@@ -202,8 +202,8 @@ defaultNormalDist =
      (rhoKuc defaultKucP))
 
 mean (ND xs) = xs V.! 0
-stdDev (ND xs) = xs V.! 1
-normalDistr mu std = ND (V.fromList [mu, std])
+stdDev (ND xs) = exp $ xs V.! 1
+normalDistr mu std = ND (V.fromList [mu, log std])
 
 instance Functor NormalDist where
   fmap f (ND v) = ND $ V.map f v
@@ -226,7 +226,7 @@ instance Differentiable NormalDist where
   transform d eps = mean d + stdDev d * eps
   epsilon _d gen = realToFrac <$> MWCD.standard gen
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
-  gradTransform _d eps = ND $ V.fromList [1.0 , eps] -- grad (\d' -> transform d' (auto eps)) d
+  gradTransform d eps = ND $ V.fromList [1.0 , eps * stdDev d] -- grad (\d' -> transform d' (auto eps)) d
 
 instance DistUtil NormalDist where
   zipDist f (ND x1) (ND x2) = ND $ V.zipWith f x1 x2
@@ -241,7 +241,7 @@ instance Dist NormalDist Double where
       sd = stdDev d
       ndPdfDenom = log $ m_sqrt_2_pi * sd
 
-  paramGradOfLogQ d x = ND $ V.fromList [(x - mu) / std, 1 / std ^ (3 :: Int) * (x - mu) ^ (2 :: Int) - 1 / std]
+  paramGradOfLogQ d x = ND $ V.fromList [(x - mu) / std, exp (negate 2) * std * (x - mu) ^ (2 :: Int) - 1]
     where
       mu = mean d
       std = stdDev d
