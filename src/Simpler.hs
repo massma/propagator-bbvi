@@ -68,13 +68,13 @@ normVec = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 1
+globalMaxStep = 2
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
 globalEta :: Double
-globalEta =  0.1 --10.0
+globalEta =  0.01 --10.0
 
 type Samples = V.Vector
 
@@ -202,17 +202,20 @@ defaultNormalDist =
      (rhoKuc defaultKucP))
 
 mean (ND xs) = xs V.! 0
-stdDev (ND xs) = exp $ xs V.! 1
+stdDev :: Floating a => NormalDist a -> a
+stdDev = exp . omega
+omega :: NormalDist a -> a
+omega (ND xs) = xs V.! 1
 normalDistr mu std = ND (V.fromList [mu, log std])
 
 instance Functor NormalDist where
   fmap f (ND v) = ND $ V.map f v
 
 instance Foldable NormalDist where
-  foldr f x0 (ND diri) = V.foldr f x0 diri
+  foldr f x0 (ND n) = V.foldr f x0 n
 
 instance Traversable NormalDist where
-  traverse f (ND diri) = ND <$> traverse f diri
+  traverse f (ND n) = ND <$> traverse f n
 
 instance Sampleable NormalDist Double where
   resample d gen = MWCD.normal (mean d) (stdDev d) gen -- transform d <$> epsilon d gen
@@ -226,7 +229,25 @@ instance Differentiable NormalDist where
   transform d eps = mean d + stdDev d * eps
   epsilon _d gen = realToFrac <$> MWCD.standard gen
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
-  gradTransform d eps = ND $ V.fromList [1.0 , eps * stdDev d] -- grad (\d' -> transform d' (auto eps)) d
+  gradTransform d eps = ND $ V.fromList [1.0 , eps * stdDev d] -- --
+-- >>> transform (normalDistr 0.0 2.0) 1.0
+-- <interactive>:2679:2-36: warning: [-Wtype-defaults]
+--     • Defaulting the following constraints to type ‘Double’
+--         (Show a0) arising from a use of ‘print’ at <interactive>:2679:2-36
+--         (Floating a0) arising from a use of ‘it’ at <interactive>:2679:2-36
+--     • In a stmt of an interactive GHCi command: print it
+-- 2.0
+
+-- >>> gradTransform (normalDistr 0.0 1.0) (2.0 :: Double)
+-- ND [1.0,2.0]
+
+-- >>> grad (\d' -> transform d' (auto 2.0)) (normalDistr 0.0 1.0)
+-- <interactive>:2603:2-60: warning: [-Wtype-defaults]
+--     • Defaulting the following constraints to type ‘Double’
+--         (Show a0) arising from a use of ‘print’ at <interactive>:2603:2-60
+--         (Floating a0) arising from a use of ‘it’ at <interactive>:2603:2-60
+--     • In a stmt of an interactive GHCi command: print it
+-- ND [1.0,2.0]
 
 instance DistUtil NormalDist where
   zipDist f (ND x1) (ND x2) = ND $ V.zipWith f x1 x2
@@ -241,10 +262,20 @@ instance Dist NormalDist Double where
       sd = stdDev d
       ndPdfDenom = log $ m_sqrt_2_pi * sd
 
-  paramGradOfLogQ d x = ND $ V.fromList [(x - mu) / std, exp (negate 2) * std * (x - mu) ^ (2 :: Int) - 1]
+  paramGradOfLogQ d x = ND $ V.fromList [(x - mu) / std, exp (negate 2 * omega d) * (x - mu) ^ (2 :: Int) - 1]
     where
       mu = mean d
       std = stdDev d
+-- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
+-- ND [2.0,3.0]
+
+-- >>> grad (\d' -> diffableLogProb d' (auto 2.0)) (normalDistr 0.0 1.0)
+-- <interactive>:1773:2-66: warning: [-Wtype-defaults]
+--     • Defaulting the following constraints to type ‘Double’
+--         (Show a0) arising from a use of ‘print’ at <interactive>:1773:2-66
+--         (Floating a0) arising from a use of ‘it’ at <interactive>:1773:2-66
+--     • In a stmt of an interactive GHCi command: print it
+-- ND [2.0,3.0]
 
 gradientScore ::
      Dist a c
@@ -448,19 +479,19 @@ mixedFit xs =
       qThetas
       qBetas
       xProp
-    (\tP0 bPs xP ->
-       watch bPs $ \betas' ->
-         with xP $ (\xs' -> do
-            tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
-            watch tP $
-              (\theta' -> do
-                 (upTh, _upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
-                 write tP upTh)
-            tPNew <- unsafeContent tP
-            write tP0 tPNew))
-      qThetas
-      qBetas
-      xProp
+    -- (\tP0 bPs xP ->
+    --    watch bPs $ \betas' ->
+    --      with xP $ (\xs' -> do
+    --         tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
+    --         watch tP $
+    --           (\theta' -> do
+    --              (upTh, _upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
+    --              write tP upTh)
+    --         tPNew <- unsafeContent tP
+    --         write tP0 tPNew))
+    --   qThetas
+    --   qBetas
+    --   xProp
     thetaF <- unsafeContent qThetas
     betaF <- unsafeContent qBetas
     return (dist thetaF, time thetaF, V.map time betaF, V.map dist betaF)
