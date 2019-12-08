@@ -4,15 +4,12 @@ module Simpler
   ( someFunc
   , Differentiable(..)
   , Dist(..)
-  , Sampleable(..)
   , Dirichlet(..)
   , defaultDirichlet
   , dirichlet
   , NormalDist(..)
   , defaultNormalDist
   , normalDistr
-  , mean
-  , stdDev
   , Obs(..)
   , defaultObs
   , PropNode(..)
@@ -39,31 +36,29 @@ import System.Random.MWC (create, uniform, initialize, GenST, uniformR)
 import qualified System.Random.MWC.Distributions as MWCD
 import qualified Statistics.Sample as Samp
 
--- from HMM:
--- splash belief propagation (BP)
 type SampleVector = V.Vector Double
 
 type SampleDouble = Double
 
-class Sampleable a c where
-  resample :: a Double -> GenST s -> ST s c
+type ParamVector = V.Vector Double
 
-class (Functor a) => DistUtil a where
-  zipDist :: (Double -> Double -> Double) -> a Double -> a Double -> a Double
-  norm :: a Double -> Double
+class DistUtil a where
+  fromParamVector :: ParamVector -> a
+  toParamVector :: a -> ParamVector
+  nParams :: a -> Int
 
-class (Functor a, Sampleable a c, DistUtil a) => Dist a c where
-  logProb :: a Double -> c -> Double
-  paramGradOfLogQ ::  a Double -> c -> a Double -- gradient of parameters evauated at some sample of x
+class DistUtil a => Dist a c where
+  resample :: a -> GenST s -> ST s c
+  logProb :: a -> c -> Double
+  paramGradOfLogQ ::  a -> c -> ParamVector -- gradient of parameters evauated at some sample of x
 
-class (Functor a) => Differentiable a where
-  diffableLogProb :: (Floating b) => a b -> b -> b
-  gradTransform :: (Floating b) => a b -> b -> a b
-  sampleGradOfLogQ :: (Floating b) => a b -> b -> b -- gradient of a sample evaluate with params of q
-  transform :: (Floating b) => a b -> b -> b
-  epsilon ::  (Floating b) => a b -> GenST s -> ST s b
+class (Dist a c) => Differentiable a c where
+  gradTransform :: a -> c -> ParamVector
+  sampleGradOfLogQ ::  a -> c -> c -- gradient of a sample evaluate with params of q
+  transform :: a -> c -> c
+  epsilon ::  a -> GenST s -> ST s c
 
-normVec = sqrt . V.sum . V.map (^ (2 :: Int))
+norm = sqrt . V.sum . V.map (^ (2 :: Int))
 
 type Time = Int
 
@@ -76,26 +71,29 @@ globalDelta = 1e-16 -- 0.00001 --
 globalEta :: Double
 globalEta =  0.1 --10.0
 
+type Gradient = V.Vector Double
+type Memory = V.Vector Double
+
 type Samples = V.Vector
 
-data PropNode a b
-  = U { memoryUpdate :: !(a b)
-      , gradientUpdate :: !(a b) }
+data PropNode a
+  = U { memoryUpdate :: !(V.Vector Double)
+      , gradientUpdate :: !(V.Vector Double) }
   | Node { time :: !Time
          , maxStep :: !Time
          , delta :: !Double
-         , memory :: !(a b)
-         , weight :: !b
-         , dist :: !(a b)
-         , prior :: !(a b)
-         , rhoF :: !(a b -> PropNode a b -> (a b, a b)) }
+         , memory :: !(V.Vector Double)
+         , weight :: !Double
+         , dist :: !a
+         , prior :: !a
+         , rhoF :: !(Gradient -> PropNode a -> (Memory, Gradient)) }
 
-type PropNodes a b = V.Vector (PropNode a b)
+type PropNodes a = V.Vector (PropNode a)
 
 -- fromPropNode (N node) = node
 -- fromPropNode (U _ _) = error "called from prop node on update"
 
-instance DistUtil a => Propagated (PropNode a Double) where
+instance DistUtil a => Propagated (PropNode a) where
   merge node@(Node {..}) (U {..})
     | norm gradientUpdate < delta = Change False node -- 0.00001
     | time >= maxStep = Change False node
@@ -104,142 +102,140 @@ instance DistUtil a => Propagated (PropNode a Double) where
       updateNode =
         (node
            { time = time + 1
-           , memory = zipDist (+) memory memoryUpdate
-           , dist = newQ
+           , memory = V.zipWith (+) memory memoryUpdate
+           , dist = fromParamVector newQ
            })
         where
-          newQ = zipDist (+) dist gradientUpdate
+          newQ = V.zipWith (+) (toParamVector dist) gradientUpdate
   merge (U _ _) _ = Contradiction mempty "Trying to update a gradient"
   -- | CAREFUL: below is dangerous if I start doing the ideas i thought
   -- about: changing maxstep and elta node for local optmizations
   merge node1@(Node {}) node2@(Node {})
     | time node1 >= maxStep node1 = Change False node1
-    | (time node2 > time node1) ||
-        (norm (zipDist (-) (dist node1) (dist node2)) >= (delta node1)) =
+    | (time node2 > time node1) &&
+        (norm (V.zipWith (-) (toParamVector $ dist node1) (toParamVector $ dist node2)) >= (delta node1)) =
       Change True (node2 {maxStep = maxStep node1, delta = delta node1})
     | otherwise = Change False node1
 
-instance DistUtil a => Propagated (PropNodes a Double) where
+instance DistUtil a => Propagated (PropNodes a) where
   merge nodes updates = V.sequence $ V.zipWith merge nodes updates
 
 newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
 
-defaultObs xs = (Node 1 globalMaxStep globalDelta (O V.empty) 0 (O xs) (O V.empty) (\_x1 _x2 -> (O V.empty, O V.empty)))
+defaultObs :: V.Vector Double -> PropNode (Obs Double)
+defaultObs xs = (Node 1 globalMaxStep globalDelta (V.empty) 0 (O xs) (O V.empty) (\_x1 _x2 -> (V.empty, V.empty)))
 
 fromO (O v) = v
 
-instance Sampleable Obs Double where
+instance Dist (Obs Double) Double where
   resample (O d) gen =
     return . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
-
-instance Functor Obs where
-  fmap f (O d) = O $ V.map f d
-
-instance Dist Obs Double where
   logProb _d _x = 0
-  paramGradOfLogQ _d _x = O V.empty
+  paramGradOfLogQ _d _x = V.empty
 
-instance DistUtil Obs where
-  zipDist _f _o1 _o2 = O V.empty
-  norm _ = 0.0
+instance DistUtil (Obs Double) where
+  nParams _x = 0
+  toParamVector _ = V.empty
+  fromParamVector _ = O V.empty
 
-instance Differentiable Obs where
-
-newtype Dirichlet a = Diri (V.Vector a) deriving (Show, Eq, Ord, Read)
+newtype Dirichlet = Diri (V.Vector Double) deriving (Show, Eq, Ord, Read)
 
 defaultDirichlet prior =
   (Node
      1
      globalMaxStep
      globalDelta
-     (fmap (const 0.0) prior)
+     (fmap (const 0.0) (toParamVector prior))
      1
      prior
      prior
      (rhoKuc defaultKucP))
 
-dirichlet xs = Diri $ V.map log xs
+dirichlet xs = Diri $ xs
 
-alphas :: Floating a => Dirichlet a -> V.Vector a
-alphas (Diri xs) = V.map exp xs
+alphas :: Dirichlet -> V.Vector Double
+alphas (Diri xs) = xs
 
-logB :: Dirichlet Double -> Double
+logB :: Dirichlet -> Double
 logB d = V.sum (V.map logGamma as) - logGamma (V.sum as)
   where
     as = alphas d
 
-instance Sampleable Dirichlet (V.Vector Double) where
-  resample d gen = MWCD.dirichlet (alphas d) gen
-
-instance Functor Dirichlet where
-  fmap f (Diri diri) = Diri $ V.map f diri
-
-instance Foldable Dirichlet where
-  foldr f x0 (Diri diri) = V.foldr f x0 diri
-
-instance Traversable Dirichlet where
-  traverse f (Diri diri) = Diri <$> traverse f diri
+instance DistUtil Dirichlet where
+  nParams = V.length . alphas
+  fromParamVector xs = dirichlet $ V.map exp xs
+  toParamVector (Diri xs) = V.map log xs
 
 instance Dist Dirichlet (V.Vector Double) where
+  resample d gen = MWCD.dirichlet (alphas d) gen
   logProb d cat =
     V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) as cat) -
     logB d
     where
       as = alphas d
-
   paramGradOfLogQ d cat =
-    Diri $ V.zipWith (\a x -> a * (summed - digamma a + log x)) as cat
+    V.zipWith (\a x -> a * (summed - digamma a + log x)) as cat
     where
       as = alphas d
       summed = digamma (V.sum as)
-
-instance DistUtil Dirichlet where
-  zipDist f (Diri x1) (Diri x2) = Diri $ V.zipWith f x1 x2
-  norm (Diri x1) = normVec x1
-
-newtype NormalDist a = ND (V.Vector a) deriving (Show, Eq, Ord, Read)
 
 defaultNormalDist =
   (Node
      1
      globalMaxStep
      globalDelta
-     (buildND 0 0)
+     (V.replicate (nParams dflt) 0)
      1
-     (normalDistr 0 1)
-     (normalDistr 0 1)
+     dflt
+     dflt
      (rhoKuc defaultKucP))
+  where
+    dflt = (normalDistr 0 1)
 
-mean (ND xs) = xs V.! 0
-stdDev :: Floating a => NormalDist a -> a
-stdDev = exp . omega
-omega :: NormalDist a -> a
-omega (ND xs) = xs V.! 1
-normalDistr mu std = ND (V.fromList [mu, log std])
-buildND x1 x2 = ND $ V.fromList [x1, x2]
+data NormalDist = ND {mean :: Double, stdDev :: Double} deriving (Show, Eq, Ord, Read)
 
-instance Functor NormalDist where
-  fmap f (ND v) = ND $ V.map f v
+omega :: NormalDist -> Double
+omega = log . stdDev
 
-instance Foldable NormalDist where
-  foldr f x0 (ND n) = V.foldr f x0 n
+normalDistr mu std = ND mu std
 
-instance Traversable NormalDist where
-  traverse f (ND n) = ND <$> traverse f n
+instance DistUtil NormalDist where
+  fromParamVector xs = normalDistr (xs V.! 0) (exp (xs V.! 1))
+  toParamVector d = V.fromList [mean d, log (stdDev d)]
+  nParams _d = 2
 
-instance Sampleable NormalDist Double where
-  resample d gen = MWCD.normal (mean d) (stdDev d) gen -- transform d <$> epsilon d gen
-
-instance Differentiable NormalDist where
-  diffableLogProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
+instance Dist NormalDist Double where
+  resample d gen = MWCD.normal (mean d) (stdDev d) gen
+  logProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
     where
       xm = x - mean d
       sd = stdDev d
+      ndPdfDenom = log $ m_sqrt_2_pi * sd
+  paramGradOfLogQ d x = V.fromList [(x - mu) / std, 1 / std ^ (2 :: Int) * (x - mu) ^ (2 :: Int) - 1]
+    where
+      mu = mean d
+      std = stdDev d
+
+diffableNormalLogProb mu sd x =  (-xm * xm / (2 * sd * sd)) - ndPdfDenom
+    where
+      xm = x - mu
       ndPdfDenom = log $ sqrt (2*pi) * sd
+-- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
+-- ND [2.0,3.0]
+
+-- >>> grad (\d' -> diffableLogProb d' (auto 2.0)) (normalDistr 0.0 1.0)
+-- <interactive>:3855:2-66: warning: [-Wtype-defaults]
+--     • Defaulting the following constraints to type ‘Double’
+--         (Show a0) arising from a use of ‘print’ at <interactive>:3855:2-66
+--         (Floating a0) arising from a use of ‘it’ at <interactive>:3855:2-66
+--     • In a stmt of an interactive GHCi command: print it
+-- ND [2.0,3.0]
+
+instance Differentiable NormalDist Double where
   transform d eps = mean d + stdDev d * eps
-  epsilon _d gen = realToFrac <$> MWCD.standard gen
+  epsilon _d gen = MWCD.standard gen
   sampleGradOfLogQ d z = -(z - mean d)/(stdDev d ** 2)
-  gradTransform d eps = ND $ V.fromList [1.0, eps * stdDev d] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
+  gradTransform d eps = V.fromList [1.0, eps * stdDev d] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
 -- >>> transform (normalDistr 0.0 2.0) 1.0
 -- <interactive>:3222:2-36: warning: [-Wtype-defaults]
 --     • Defaulting the following constraints to type ‘Double’
@@ -259,37 +255,12 @@ instance Differentiable NormalDist where
 --     • In a stmt of an interactive GHCi command: print it
 -- ND [1.0,2.0]
 
-instance DistUtil NormalDist where
-  zipDist f (ND x1) (ND x2) = ND $ V.zipWith f x1 x2
-  norm (ND x) = normVec x
-
-instance Dist NormalDist Double where
-  logProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
-    where
-      xm = x - mean d
-      sd = stdDev d
-      ndPdfDenom = log $ m_sqrt_2_pi * sd
-
-  paramGradOfLogQ d x = ND $ V.fromList [(x - mu) / std, exp (negate 2 * omega d) * (x - mu) ^ (2 :: Int) - 1]
-    where
-      mu = mean d
-      std = stdDev d
--- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
--- ND [2.0,3.0]
-
--- >>> grad (\d' -> diffableLogProb d' (auto 2.0)) (normalDistr 0.0 1.0)
--- <interactive>:3855:2-66: warning: [-Wtype-defaults]
---     • Defaulting the following constraints to type ‘Double’
---         (Show a0) arising from a use of ‘print’ at <interactive>:3855:2-66
---         (Floating a0) arising from a use of ‘it’ at <interactive>:3855:2-66
---     • In a stmt of an interactive GHCi command: print it
--- ND [2.0,3.0]
 
 gradientScore ::
      Dist a c
-  => PropNode a Double
+  => PropNode a
   -> (Double, V.Vector Double, Samples c)
-  -> PropNode a Double
+  -> PropNode a
 gradientScore = gradient f
   where
     f Node {..} nFactors s l =
@@ -298,10 +269,10 @@ gradientScore = gradient f
         (paramGradOfLogQ dist s)
 
 gradient f q@(Node{..}) (nFactors, like, samples) =
-  U memory' (zipDist (*) rho' grad)
+  U memory' (V.zipWith (*) rho' grad)
   where
     summed =
-      V.foldl' (zipDist (+)) (fmap (const 0.0) dist) $
+      V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0) $
       V.zipWith
         (f q nFactors)
         samples
@@ -311,10 +282,10 @@ gradient f q@(Node{..}) (nFactors, like, samples) =
 
 -- | TODO: speed up by calc length in one pass
 gradientReparam ::
-     (DistUtil a, Differentiable a)
-  => PropNode a Double
+     (Differentiable a Double)
+  => PropNode a
   -> (Double, V.Vector Double, Samples Double)
-  -> PropNode a Double
+  -> PropNode a
 gradientReparam = gradient f
   where
     f Node {..} nFactors s l =
@@ -327,13 +298,13 @@ gradientReparam = gradient f
 
 rhoKuc KucP{..} gra Node{..} =
   ( deltaM
-  , zipDist
+  , V.zipWith
       (\ds s ->
          eta * (fromIntegral time) ** (negate 0.5 + eps) *
          (1.0 / (tau + sqrt (s + ds))))
       deltaM memory)
   where
-    deltaM = zipDist (\g s -> alpha * g ^ (2 :: Int) - alpha * s) gra memory
+    deltaM = V.zipWith (\g s -> alpha * g ^ (2 :: Int) - alpha * s) gra memory
 
 data KucP = KucP
   { alpha :: Double
@@ -362,9 +333,9 @@ mixedLike nSamp nObs std gen xsN thetaN betasN = do
                          (V.map (auto . log) th)
                          (V.map
                             (\mu ->
-                               diffableLogProb
-                                 (normalDistr mu (auto std))
-                                 (auto x))
+                               diffableNormalLogProb
+                                  mu (auto std)
+                                  (auto x))
                             bs))
                     (V.map (\d -> transform d eps) betas))
                (obs :: V.Vector Double))
