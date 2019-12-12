@@ -236,7 +236,7 @@ instance Dist NormalDist SampleDouble where
 -- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
 -- [2.0,3.0]
 -- >>> grad (\[mu, omega] -> diffableNormalLogProb mu (exp omega) (auto 2.0)) [0.0, log 1.0] :: [Double]
--- <interactive>:12791:8-70: warning: [-Wincomplete-uni-patterns]
+-- <interactive>:129:8-70: warning: [-Wincomplete-uni-patterns]
 --     Pattern match(es) are non-exhaustive
 --     In a lambda abstraction:
 --         Patterns not matched:
