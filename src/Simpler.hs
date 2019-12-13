@@ -103,6 +103,8 @@ data PropNode a
 
 type PropNodes a = V.Vector (PropNode a)
 
+type PropNodess a = V.Vector (V.Vector (PropNode a))
+
 instance DistUtil a => Propagated (PropNode a) where
   merge node@(Node {..}) (U {..})
     | norm gradientUpdate < delta = Change False node
@@ -135,6 +137,9 @@ instance DistUtil a => Propagated (PropNode a) where
     = Change False node1
 
 instance DistUtil a => Propagated (PropNodes a) where
+  merge nodes updates = V.sequence $ V.zipWith merge nodes updates
+
+instance DistUtil a => Propagated (PropNodess a) where
   merge nodes updates = V.sequence $ V.zipWith merge nodes updates
 
 newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
@@ -332,43 +337,56 @@ unsafeContent = (fromMaybe (error "impos") <$>) . content
 
 
 -- mixed membership
-mixedLike nSamp nObs std gen obs thetasN betasN = do
-  thetaSamp   <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
-  betaSamples <- V.replicateM
-    nSamp
-    (V.replicateM (V.length (betas V.! 0)) (epsilon (betas V.! 0) gen))
+mixedLike nSamp nObs std gen obss thetasN betassN = do
+  thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
+  betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
   let
-    (likes, gradLikes) = V.unzip $ V.zipWith
+    (thetaLikes, gradLikes) = V.unzip $ V.zipWith
       (\eps ths ->
-        V.foldl1' (\(x1, y1) (x2, y2) -> (x1 + x2, V.zipWith (+) y1 y2))
+        V.foldl1'
+            (\(l1, g1) (l2, g2) -> (l1 + l2, V.zipWith (V.zipWith (+)) g1 g2))
           $ V.zipWith
-              (\x th -> grad'
-                (\bs -> logSum
+              (\obs th ->
+                 -- let aThs = V.map (auto . log) th in
+                 -- V.imap (\i ob ->
+                 --           (\bs ->
+                 --              logSum aThs (V.map (\mu -> diffableNormalLogProb mu )
+                 --           )
+                          grad'
+                (\bss -> logSum
                   (V.map (auto . log) th)
-                  (V.map (\mu -> diffableNormalLogProb mu (auto std) (auto x))
-                         bs
+                  (V.map
+                    ( V.sum
+                    . V.zipWith
+                        (\ob mu ->
+                          diffableNormalLogProb mu (auto std) (auto ob)
+                        )
+                        obs
+                    )
+                    bss
                   )
                 )
-                (V.map (\d -> transform d eps) betas)
+                (V.map (V.map (\d -> transform d eps)) betass)
               )
-              (obs :: V.Vector (V.Vector (Maybe Double)))
+              (obss :: V.Vector (V.Vector Double)) -- Maybe Double
               ths
       )
       betaSamples
-      thetaSamp
+      thetaSamples
   return
     $ ( V.imap
-        (\i d ->
-          gradientScore d (1, V.map (V.! i) likes, (V.map (V.! i) thetaSamp))
+        (\i d -> gradientScore
+          d
+          (1, V.map (V.! i) likes, (V.map (V.! i) thetaSamples))
         )
         thetasN
       , V.imap
         (\i d -> gradientReparam d (1, V.map (V.! i) gradLikes, betaSamples))
-        betasN
+        betassN
       )
  where
   thetas = V.map dist thetasN
-  betas  = V.map dist betasN
+  betass = V.map dist betassN
 
 logSum v1 = log . V.sum . V.map exp . V.zipWith (+) v1
 
@@ -397,12 +415,16 @@ logSum v1 = log . V.sum . V.map exp . V.zipWith (+) v1
 --   theta = dist thetaN
 --   betas = V.map dist betasN
 
-genMixed :: ST s (V.Vector (V.Vector (Maybe Double)))
+nLocs :: Int
+nLocs = 9 * 36
+nDays :: Int
+nDays = 118 * 31
+nStates :: Int
+nStates = 10
+
+genMixed :: ST s (V.Vector (V.Vector (Double))) -- Maybe Double
 genMixed = do
   gen <- create
-  let nLocs      = 9 * 36
-  let nDays      = 118 * 31
-  let nStates    = 10
   -- initialize dirichlet that favors sparse categoricals
   let diriParam  = 0.01
   let thetaParam = MWCD.dirichlet (V.replicate nStates diriParam) gen
@@ -423,7 +445,7 @@ genMixed = do
     nDays
     (\day -> V.generateM
       nLocs
-      (\loc -> (thetas' V.! day) >>= \z -> Just <$> ((betas' V.! z) V.! loc))
+      (\loc -> (thetas' V.! day) >>= \z -> ((betas' V.! z) V.! loc)) -- Just <$>
     )
   return xs
 
@@ -435,13 +457,10 @@ mixedFit xs = runST $ do
   let nSamp      = 10
   let nObs       = 100
   let localStep  = 20
-  let nClusters  = 2
   qBetas <- known =<< V.generateM
     nClusters
-    (\i -> do
-         -- mu <- resample priorBeta gen1
-         -- really I am doing empiracle bayes here ( would do mu - 1std, mu + 1 std), this approach makes things easier for testing
-      let mu = if i == 0 then 2 else (negate 2)
+    (\_i -> do
+      mu <- resample priorBeta gen1
       return
         (defaultNormalDist { dist    = normalDistr mu (1.0 :: Double)
                            , maxStep = globalMaxStep
