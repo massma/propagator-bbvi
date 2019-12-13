@@ -325,72 +325,106 @@ data KucP = KucP
 -- | eta is what you probably want to tune: kucukelbir trys 0.01 0.1 1 10 100
 defaultKucP = KucP { alpha = 0.1, eta = globalEta, tau = 1.0, eps = 1e-16 }
 
-mixedLike nSamp nObs std gen xsN thetaN betasN = do
-  obs         <- V.replicateM nObs (resample xs gen)
-  thetaSamp   <- V.replicateM nSamp (resample theta gen)
-  betaSamples <- V.replicateM nSamp (epsilon (betas V.! 0) gen)
+initLocal step p = p { maxStep = time p + step }
+initLocalDefault p = initLocal (maxStep p) p
+
+unsafeContent = (fromMaybe (error "impos") <$>) . content
+
+
+-- mixed membership
+mixedLike nSamp nObs std gen obs thetasN betasN = do
+  thetaSamp   <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
+  betaSamples <- V.replicateM
+    nSamp
+    (V.replicateM (V.length (betas V.! 0)) (epsilon (betas V.! 0) gen))
   let
     (likes, gradLikes) = V.unzip $ V.zipWith
-      (\eps th ->
-        V.foldl1' (\(x1, y1) (x2, y2) -> (x1 + x2, V.zipWith (+) y1 y2)) $ V.map
-          (\x -> grad'
-            (\bs -> logSum
-              (V.map (auto . log) th)
-              (V.map (\mu -> diffableNormalLogProb mu (auto std) (auto x)) bs)
-            )
-            (V.map (\d -> transform d eps) betas)
-          )
-          (obs :: V.Vector Double)
+      (\eps ths ->
+        V.foldl1' (\(x1, y1) (x2, y2) -> (x1 + x2, V.zipWith (+) y1 y2))
+          $ V.zipWith
+              (\x th -> grad'
+                (\bs -> logSum
+                  (V.map (auto . log) th)
+                  (V.map (\mu -> diffableNormalLogProb mu (auto std) (auto x))
+                         bs
+                  )
+                )
+                (V.map (\d -> transform d eps) betas)
+              )
+              (obs :: V.Vector (V.Vector (Maybe Double)))
+              ths
       )
       betaSamples
       thetaSamp
   return
-    $ ( gradientScore thetaN (1, likes, thetaSamp)
+    $ ( V.imap
+        (\i d ->
+          gradientScore d (1, V.map (V.! i) likes, (V.map (V.! i) thetaSamp))
+        )
+        thetasN
       , V.imap
         (\i d -> gradientReparam d (1, V.map (V.! i) gradLikes, betaSamples))
         betasN
       )
  where
-    -- obs = xsN
-  xs    = dist xsN
-  theta = dist thetaN
-  betas = V.map dist betasN
+  thetas = V.map dist thetasN
+  betas  = V.map dist betasN
 
 logSum v1 = log . V.sum . V.map exp . V.zipWith (+) v1
 
-mixedLikeScore nSamp nObs std gen xsN thetaN betasN = do
-  obs         <- V.replicateM nObs (resample xs gen)
-  thetaSamp   <- V.replicateM nSamp (resample theta gen)
-  betaSamples <- V.replicateM nSamp (V.mapM (\b -> resample b gen) betas)
-  let
-    likes = V.zipWith
-      (\bs th -> V.sum $ V.map
-        (\x -> logSum (V.map log th)
-                      (V.map (\mu -> logProb (normalDistr mu std) x) bs)
-        )
-        (obs :: V.Vector Double)
-      )
-      betaSamples
-      thetaSamp
-  return
-    $ ( gradientScore thetaN (1, likes, thetaSamp)
-      , V.imap (\i d -> gradientScore d (1, likes, V.map (V.! i) betaSamples))
-               betasN
-      )
- where
-    -- obs = xsN
-  xs    = dist xsN
-  theta = dist thetaN
-  betas = V.map dist betasN
+-- mixedLikeScore nSamp nObs std gen xsN thetaN betasN = do
+--   obs         <- V.replicateM nObs (resample xs gen)
+--   thetaSamp   <- V.replicateM nSamp (resample theta gen)
+--   betaSamples <- V.replicateM nSamp (V.mapM (\b -> resample b gen) betas)
+--   let
+--     likes = V.zipWith
+--       (\bs th -> V.sum $ V.map
+--         (\x -> logSum (V.map log th)
+--                       (V.map (\mu -> logProb (normalDistr mu std) x) bs)
+--         )
+--         (obs :: V.Vector Double)
+--       )
+--       betaSamples
+--       thetaSamp
+--   return
+--     $ ( gradientScore thetaN (1, likes, thetaSamp)
+--       , V.imap (\i d -> gradientScore d (1, likes, V.map (V.! i) betaSamples))
+--                betasN
+--       )
+--  where
+--     -- obs = xsN
+--   xs    = dist xsN
+--   theta = dist thetaN
+--   betas = V.map dist betasN
 
-genMixture :: ST s (V.Vector Double)
-genMixture = do
+genMixed :: ST s (V.Vector (V.Vector (Maybe Double)))
+genMixed = do
   gen <- create
-  let theta' = MWCD.categorical (V.fromList [5.0, 10.0]) gen
-  let std    = 1.0
-  let mixtures =
-        V.fromList [MWCD.normal 5.0 std gen, MWCD.normal (-5.0) std gen]
-  xs <- V.replicateM 1000 ((mixtures V.!) =<< theta')
+  let nLocs      = 9 * 36
+  let nDays      = 118 * 31
+  let nStates    = 10
+  -- initialize dirichlet that favors sparse categoricals
+  let diriParam  = 0.01
+  let thetaParam = MWCD.dirichlet (V.replicate nStates diriParam) gen
+  thetasTrue <- V.replicateM nDays thetaParam
+  let thetas' = V.map (\theta' -> MWCD.categorical theta' gen) thetasTrue
+  let betaStd = 0.001
+  let betas' = V.generate
+        nStates
+        (\k -> V.replicate
+          nLocs
+          (MWCD.normal
+            ((fromIntegral k - (fromIntegral (nStates - 1) * 0.5)) * 1)
+            betaStd
+            gen
+          )
+        )
+  xs <- V.generateM
+    nDays
+    (\day -> V.generateM
+      nLocs
+      (\loc -> (thetas' V.! day) >>= \z -> Just <$> ((betas' V.! z) V.! loc))
+    )
   return xs
 
 mixedFit xs = runST $ do
@@ -428,50 +462,48 @@ mixedFit xs = runST $ do
       )
     )
   xProp <- known $ defaultObs xs
-  -- (\tP bPs xP ->
-  --    watch tP $ \theta' ->
-  --      with xP $ \xs' ->
-  --        with bPs $ \betas' -> do
-  --          (upTh, upB) <-
-  --            mixedLike nSamp nObs 1.0 gen1 xs' theta' betas'
-  --          write bPs upB
-  --          write tP upTh)
-  --   qThetas
-  --   qBetas
-  --   xProp
-  (\tP bPs0 xP -> watch tP $ \theta' ->
-      with xP
-        $ (\xs' -> do
-            bPs <- known =<< (V.map (initLocal localStep) <$> unsafeContent bPs0)
-            watch bPs $ \betas' -> do
-              (_upTh, upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
-              write bPs upB
-            bPsNew <- unsafeContent bPs
-            write bPs0 bPsNew
-          )
+  (\tP bPs xP -> watch tP $ \theta' -> with xP $ \xs' -> with bPs $ \betas' ->
+      do
+        (upTh, upB) <- mixedLike nSamp nObs 1.0 gen1 xs' theta' betas'
+        write bPs upB
+        write tP  upTh
     )
     qThetas
     qBetas
     xProp
-  (\tP0 bPs xP -> watch bPs $ \betas' ->
-      with xP
-        $ (\xs' -> do
-            tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
-            watch tP
-              $ (\theta' -> do
-                  (upTh, _upB) <- mixedLikeScore nSamp
-                                                 nObs
-                                                 1.0
-                                                 gen1
-                                                 xs'
-                                                 theta'
-                                                 betas'
-                  write tP upTh
-                )
-            tPNew <- unsafeContent tP
-            write tP0 tPNew
-          )
-    )
+  -- (\tP bPs0 xP -> watch tP $ \theta' ->
+  --     with xP
+  --       $ (\xs' -> do
+  --           bPs <- known =<< (V.map (initLocal localStep) <$> unsafeContent bPs0)
+  --           watch bPs $ \betas' -> do
+  --             (_upTh, upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
+  --             write bPs upB
+  --           bPsNew <- unsafeContent bPs
+  --           write bPs0 bPsNew
+  --         )
+  --   )
+  --   qThetas
+  --   qBetas
+  --   xProp
+  -- (\tP0 bPs xP -> watch bPs $ \betas' ->
+  --     with xP
+  --       $ (\xs' -> do
+  --           tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
+  --           watch tP
+  --             $ (\theta' -> do
+  --                 (upTh, _upB) <- mixedLikeScore nSamp
+  --                                                nObs
+  --                                                1.0
+  --                                                gen1
+  --                                                xs'
+  --                                                theta'
+  --                                                betas'
+  --                 write tP upTh
+  --               )
+  --           tPNew <- unsafeContent tP
+  --           write tP0 tPNew
+  --         )
+  --   )
     qThetas
     qBetas
     xProp
@@ -485,19 +517,16 @@ mixedFit xs = runST $ do
     , V.map (\d -> (mean d, stdDev d)) betaDists
     )
 
-initLocal step p = p { maxStep = time p + step }
-initLocalDefault p = initLocal (maxStep p) p
-
-unsafeContent = (fromMaybe (error "impos") <$>) . content
-
 someFunc :: IO ()
 someFunc = do
   -- let xs = runST $ genNormal
   -- putStrLn (show $ normalFit xs)
-  let xs = runST $ genMixture
-  putStrLn $ unlines $ V.toList $ V.map show xs
-  putStrLn (show $ mixedFit xs)
+  -- let xs = runST $ genMixture
+  -- putStrLn $ unlines $ V.toList $ V.map show xs
+  -- putStrLn (show $ mixtureFit xs)
   -- let xs = runST $ genDirichlet
   -- putStrLn (show $ dirichletFit xs)
+  let xs = runST $ genMixed
+  putStrLn (show $ mixedFit xs)
 -- >>> someFunc
 --
