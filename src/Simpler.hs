@@ -341,35 +341,28 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
   thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
   betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
   let
-    (thetaLikes, gradLikes) = V.unzip $ V.zipWith
-      (\eps ths ->
-        V.foldl1'
-            (\(l1, g1) (l2, g2) -> (l1 + l2, V.zipWith (V.zipWith (+)) g1 g2))
-          $ V.zipWith
-              (\obs th ->
-                 -- let aThs = V.map (auto . log) th in
-                 -- V.imap (\i ob ->
-                 --           (\bs ->
-                 --              logSum aThs (V.map (\mu -> diffableNormalLogProb mu )
-                 --           )
-                          grad'
-                (\bss -> logSum
-                  (V.map (auto . log) th)
-                  (V.map
-                    ( V.sum
-                    . V.zipWith
-                        (\ob mu ->
-                          diffableNormalLogProb mu (auto std) (auto ob)
-                        )
-                        obs
+    (thetaLikes, gradLikesTranspose) = V.unzip $ V.zipWith
+      (\eps ths -> V.unzip $ V.zipWith
+        (\obs th ->
+          let aThs = V.map log th
+          in
+            -- here grad is vector of loc x cluster, we want cluster x loc
+            V.foldl1' (\(l1, g1) (l2, g2) -> (l1 + l2, V.zipWith (+) g1 g2))
+              $ V.imap
+                  (\i ob -> grad'
+                    (\bs -> logSum
+                      (V.map auto aThs)
+                      (V.map
+                        (\mu -> diffableNormalLogProb mu (auto std) (auto ob))
+                        bs
+                      )
                     )
-                    bss
+                    (V.map (\v -> transform (v V.! i) eps) betass)
                   )
-                )
-                (V.map (V.map (\d -> transform d eps)) betass)
-              )
-              (obss :: V.Vector (V.Vector Double)) -- Maybe Double
-              ths
+                  obs
+        )
+        (obss :: V.Vector (V.Vector Double)) -- Maybe Double
+        ths
       )
       betaSamples
       thetaSamples
@@ -377,16 +370,22 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
     $ ( V.imap
         (\i d -> gradientScore
           d
-          (1, V.map (V.! i) likes, (V.map (V.! i) thetaSamples))
+          (1, V.map (V.! i) thetaLikes, (V.map (V.! i) thetaSamples))
         )
         thetasN
       , V.imap
-        (\i d -> gradientReparam d (1, V.map (V.! i) gradLikes, betaSamples))
+        (\c clusters -> V.imap
+          (\loc d -> gradientReparam
+            d
+            (1, V.map ((V.! c) . (V.! loc)) gradLikesTranspose, betaSamples)
+          )
+          clusters
+        )
         betassN
       )
  where
   thetas = V.map dist thetasN
-  betass = V.map dist betassN
+  betass = V.map (V.map dist) betassN
 
 logSum v1 = log . V.sum . V.map exp . V.zipWith (+) v1
 
