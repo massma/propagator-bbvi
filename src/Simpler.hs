@@ -46,6 +46,7 @@ import           System.Random.MWC              ( create
                                                 )
 -- import Statistics.Distribution
 -- import Statistics.Distribution.Normal
+import qualified Statistics.Sample             as StSa
 import qualified System.Random.MWC.Distributions
                                                as MWCD
 
@@ -451,44 +452,41 @@ genMixed = do
 mixedFit xs = runST $ do
   genG <- create
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
-  let priorTheta = dirichlet (V.fromList [0.1, 0.1])
+  let priorTheta = dirichlet (V.replicate nStates 0.1)
   let priorBeta  = normalDistr 0.0 4.0
   let nSamp      = 10
   let nObs       = 100
   let localStep  = 20
   qBetas <- known =<< V.generateM
-    nClusters
-    (\_i -> do
-      mu <- resample priorBeta gen1
-      return
-        (defaultNormalDist { dist    = normalDistr mu (1.0 :: Double)
-                           , maxStep = globalMaxStep
-                           , delta   = globalDelta -- 0.0000001
-                           , prior   = normalDistr mu (1.0 :: Double) -- priorBeta
-                           , weight  = 1
-                           }
-        )
-    )
-  qThetas <-
-    -- resample (dirichlet (V.replicate nClusters 1)) gen1 >>= \startTh ->
-    ( known
-    $ ((defaultDirichlet priorTheta) { maxStep = globalMaxStep
-                                     , delta   = globalDelta -- 0.0000001
-                                     , dist    = dirichlet (V.replicate 2 1.0) -- startTh
-                                     , weight  = 1
-                                     }
+    nStates
+    (\_i -> V.replicateM
+      nLocs
+      (do
+        mu <- resample priorBeta gen1
+        return
+          (defaultNormalDist { dist    = normalDistr mu (1.0 :: Double)
+                             , maxStep = globalMaxStep
+                             , delta   = globalDelta -- 0.0000001
+                             , prior   = normalDistr mu (1.0 :: Double) -- priorBeta
+                             , weight  = 1
+                             }
+          )
       )
     )
-  xProp <- known $ defaultObs xs
-  (\tP bPs xP -> watch tP $ \theta' -> with xP $ \xs' -> with bPs $ \betas' ->
-      do
-        (upTh, upB) <- mixedLike nSamp nObs 1.0 gen1 xs' theta' betas'
-        write bPs upB
-        write tP  upTh
+  qThetas <- known $ V.replicate
+    nDays
+    ((defaultDirichlet priorTheta) { maxStep = globalMaxStep
+                                   , delta   = globalDelta -- 0.0000001
+                                   , weight  = 1
+                                   }
+    )
+  (\tP bPs -> watch tP $ \theta' -> with bPs $ \betas' -> do
+      (upTh, upB) <- mixedLike nSamp nObs 1.0 gen1 xs theta' betas'
+      write bPs upB
+      write tP  upTh
     )
     qThetas
     qBetas
-    xProp
   -- (\tP bPs0 xP -> watch tP $ \theta' ->
   --     with xP
   --       $ (\xs' -> do
@@ -522,17 +520,17 @@ mixedFit xs = runST $ do
   --           write tP0 tPNew
   --         )
   --   )
-    qThetas
-    qBetas
-    xProp
+    -- qThetas
+    -- qBetas
+    -- xProp
   thetaF <- unsafeContent qThetas
   betaF  <- unsafeContent qBetas
-  let betaDists = V.map dist betaF
+  let betaDists = V.map (V.map dist) betaF
   return
-    ( alphas (dist thetaF)
-    , time thetaF
-    , V.map time betaF
-    , V.map (\d -> (mean d, stdDev d)) betaDists
+    ( V.map time thetaF
+    , V.map (V.map time) betaF
+    , V.map (StSa.mean . V.map mean) betaDists
+    , V.map (StSa.mean . V.map stdDev) betaDists
     )
 
 someFunc :: IO ()
