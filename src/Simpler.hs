@@ -77,13 +77,13 @@ norm = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 10000
+globalMaxStep = 1000
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
 globalEta :: Double
-globalEta = 0.1 --10.0
+globalEta = 1.0 -- 0.1 --10.0
 
 type Gradient = V.Vector Double
 type Memory = V.Vector Double
@@ -390,30 +390,55 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
 
 logSum v1 = log . V.sum . V.map exp . V.zipWith (+) v1
 
--- mixedLikeScore nSamp nObs std gen xsN thetaN betasN = do
---   obs         <- V.replicateM nObs (resample xs gen)
---   thetaSamp   <- V.replicateM nSamp (resample theta gen)
---   betaSamples <- V.replicateM nSamp (V.mapM (\b -> resample b gen) betas)
+-- mixedLikeScore nSamp nObs std gen obss thetasN betassN = do
+--   thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
+--   betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
 --   let
---     likes = V.zipWith
---       (\bs th -> V.sum $ V.map
---         (\x -> logSum (V.map log th)
---                       (V.map (\mu -> logProb (normalDistr mu std) x) bs)
+--     (thetaLikes, gradLikesTranspose) = V.unzip $ V.zipWith
+--       (\eps ths -> V.unzip $ V.zipWith
+--         (\obs th ->
+--           let aThs = V.map log th
+--           in
+--             -- here grad is vector of loc x cluster, we want cluster x loc
+--             V.foldl1' (\(l1, g1) (l2, g2) -> (l1 + l2, V.zipWith (+) g1 g2))
+--               $ V.imap
+--                   (\i ob -> grad'
+--                     (\bs -> logSum
+--                       (V.map auto aThs)
+--                       (V.map
+--                         (\mu -> diffableNormalLogProb mu (auto std) (auto ob))
+--                         bs
+--                       )
+--                     )
+--                     (V.map (\v -> transform (v V.! i) eps) betass)
+--                   )
+--                   obs
 --         )
---         (obs :: V.Vector Double)
+--         (obss :: V.Vector (V.Vector Double)) -- Maybe Double
+--         ths
 --       )
 --       betaSamples
---       thetaSamp
+--       thetaSamples
 --   return
---     $ ( gradientScore thetaN (1, likes, thetaSamp)
---       , V.imap (\i d -> gradientScore d (1, likes, V.map (V.! i) betaSamples))
---                betasN
+--     $ ( V.imap
+--         (\i d -> gradientScore
+--           d
+--           (1, V.map (V.! i) thetaLikes, (V.map (V.! i) thetaSamples))
+--         )
+--         thetasN
+--       , V.imap
+--         (\c clusters -> V.imap
+--           (\loc d -> gradientReparam
+--             d
+--             (1, V.map ((V.! c) . (V.! loc)) gradLikesTranspose, betaSamples)
+--           )
+--           clusters
+--         )
+--         betassN
 --       )
 --  where
---     -- obs = xsN
---   xs    = dist xsN
---   theta = dist thetaN
---   betas = V.map dist betasN
+--   thetas = V.map dist thetasN
+--   betass = V.map (V.map dist) betassN
 
 nLocs :: Int
 nLocs = 1 -- 9 * 36
@@ -460,11 +485,11 @@ mixedFit xs = runST $ do
   qBetas <- known =<< V.generateM
     nStates
     (\i ->
-      let mu' = if i == 0 then 0 else 5
+      let mu' = if i == 0 then 2 else 3
       in  V.replicateM
             nLocs
             (do
-                                          -- mu <- resample priorBeta gen1
+                                                          -- mu <- resample priorBeta gen1
               return
                 (defaultNormalDist { dist    = normalDistr mu' (1.0 :: Double)
                                    , maxStep = globalMaxStep
