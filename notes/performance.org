@@ -664,3 +664,38 @@ user	0m3.325s
 sys	0m0.160s
 
 Compilation finished at Wed Dec 11 22:13:31
+* first crack at mixed membership
+** n = 10000
+   (10000.0,[10000.0,10000.0],[0.7672583431866733,4.25616259909106],[0.8943752025815577,0.8958482161670576])
+1,362,741,328,224 bytes allocated in the heap
+222,087,597,237,528 bytes copied during GC
+   3,319,934,872 bytes maximum residency (431 sample(s))
+      15,199,864 bytes maximum slop
+            3166 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     1305067 colls, 549389 par   641.928s  275.471s     0.0002s    0.0038s
+  Gen  1       431 colls,   347 par   390.455s  324.363s     0.7526s    4.7623s
+
+  Parallel GC work balance: 36.23% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.001s  (  0.001s elapsed)
+  MUT     time  458.607s  (504.976s elapsed)
+  GC      time  1032.383s  (599.834s elapsed)
+  EXIT    time    0.001s  (  0.000s elapsed)
+  Total   time  1490.993s  (1104.811s elapsed)
+
+  Alloc rate    2,971,476,868 bytes per MUT second
+
+  Productivity  30.8% of total user, 45.7% of total elapsed
+
+
+real	18m25.072s
+user	24m51.246s
+sys	3m48.786s
+
+Compilation finished at Fri Dec 13 20:38:10

@@ -416,11 +416,11 @@ logSum v1 = log . V.sum . V.map exp . V.zipWith (+) v1
 --   betas = V.map dist betasN
 
 nLocs :: Int
-nLocs = 9 * 36
+nLocs = 1 -- 9 * 36
 nDays :: Int
-nDays = 118 * 31
+nDays = 1000 -- 118 * 31
 nStates :: Int
-nStates = 10
+nStates = 2 -- 10
 
 genMixed :: ST s (V.Vector (V.Vector (Double))) -- Maybe Double
 genMixed = do
@@ -436,7 +436,7 @@ genMixed = do
         (\k -> V.replicate
           nLocs
           (MWCD.normal
-            ((fromIntegral k - (fromIntegral (nStates - 1) * 0.5)) * 1)
+            ((fromIntegral k - (fromIntegral (nStates - 1) * 0.5)) * 5)
             betaStd
             gen
           )
@@ -453,25 +453,27 @@ mixedFit xs = runST $ do
   genG <- create
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
   let priorTheta = dirichlet (V.replicate nStates 0.1)
-  let priorBeta  = normalDistr 0.0 4.0
+  -- let priorBeta  = normalDistr 0.0 4.0
   let nSamp      = 10
-  let nObs       = 100
-  let localStep  = 20
+  let nObs       = (100 :: Int)
+  -- let localStep  = 20
   qBetas <- known =<< V.generateM
     nStates
-    (\_i -> V.replicateM
-      nLocs
-      (do
-        mu <- resample priorBeta gen1
-        return
-          (defaultNormalDist { dist    = normalDistr mu (1.0 :: Double)
-                             , maxStep = globalMaxStep
-                             , delta   = globalDelta -- 0.0000001
-                             , prior   = normalDistr mu (1.0 :: Double) -- priorBeta
-                             , weight  = 1
-                             }
-          )
-      )
+    (\i ->
+      let mu' = if i == 0 then 0 else 5
+      in  V.replicateM
+            nLocs
+            (do
+                                          -- mu <- resample priorBeta gen1
+              return
+                (defaultNormalDist { dist    = normalDistr mu' (1.0 :: Double)
+                                   , maxStep = globalMaxStep
+                                   , delta   = globalDelta -- 0.0000001
+                                   , prior   = normalDistr mu' (1.0 :: Double) -- priorBeta
+                                   , weight  = 1
+                                   }
+                )
+            )
     )
   qThetas <- known $ V.replicate
     nDays
@@ -527,8 +529,8 @@ mixedFit xs = runST $ do
   betaF  <- unsafeContent qBetas
   let betaDists = V.map (V.map dist) betaF
   return
-    ( V.map time thetaF
-    , V.map (V.map time) betaF
+    ( StSa.mean . V.map (fromIntegral . time) $ thetaF
+    , V.map (StSa.mean . V.map (fromIntegral . time)) betaF
     , V.map (StSa.mean . V.map mean) betaDists
     , V.map (StSa.mean . V.map stdDev) betaDists
     )
