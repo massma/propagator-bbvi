@@ -83,7 +83,7 @@ globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
 globalEta :: Double
-globalEta = 1.0 -- 0.1 --10.0
+globalEta = 0.1 -- 0.1 --10.0
 
 type Gradient = V.Vector Double
 type Memory = V.Vector Double
@@ -390,55 +390,48 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
 
 logSum v1 = log . V.sum . V.map exp . V.zipWith (+) v1
 
--- mixedLikeScore nSamp nObs std gen obss thetasN betassN = do
---   thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
---   betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
---   let
---     (thetaLikes, gradLikesTranspose) = V.unzip $ V.zipWith
---       (\eps ths -> V.unzip $ V.zipWith
---         (\obs th ->
---           let aThs = V.map log th
---           in
---             -- here grad is vector of loc x cluster, we want cluster x loc
---             V.foldl1' (\(l1, g1) (l2, g2) -> (l1 + l2, V.zipWith (+) g1 g2))
---               $ V.imap
---                   (\i ob -> grad'
---                     (\bs -> logSum
---                       (V.map auto aThs)
---                       (V.map
---                         (\mu -> diffableNormalLogProb mu (auto std) (auto ob))
---                         bs
---                       )
---                     )
---                     (V.map (\v -> transform (v V.! i) eps) betass)
---                   )
---                   obs
---         )
---         (obss :: V.Vector (V.Vector Double)) -- Maybe Double
---         ths
---       )
---       betaSamples
---       thetaSamples
---   return
---     $ ( V.imap
---         (\i d -> gradientScore
---           d
---           (1, V.map (V.! i) thetaLikes, (V.map (V.! i) thetaSamples))
---         )
---         thetasN
---       , V.imap
---         (\c clusters -> V.imap
---           (\loc d -> gradientReparam
---             d
---             (1, V.map ((V.! c) . (V.! loc)) gradLikesTranspose, betaSamples)
---           )
---           clusters
---         )
---         betassN
---       )
---  where
---   thetas = V.map dist thetasN
---   betass = V.map (V.map dist) betassN
+mixedLikeScore nSamp nObs std gen obss thetasN betassN = do
+  thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
+  betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
+  let (thetaLikes, betaLikes) = V.unzip $ V.zipWith
+        (\eps ths -> V.unzip $ V.zipWith
+          (\obs th ->
+            let aThs   = V.map log th
+                logVec = V.imap
+                  (\i ob -> logSum
+                    aThs
+                    (V.map (\mu -> logProb (normalDistr mu std) ob)
+                           (V.map (\v -> transform (v V.! i) eps) betass)
+                    )
+                  )
+                  obs
+            in  (V.sum logVec, logVec)
+          )
+          (obss :: V.Vector (V.Vector Double)) -- Maybe Double
+          ths
+        )
+        betaSamples
+        thetaSamples
+  return
+    $ ( V.imap
+        (\i d -> gradientScore
+          d
+          (1, V.map (V.! i) thetaLikes, (V.map (V.! i) thetaSamples))
+        )
+        thetasN
+      , V.imap
+        (\_c clusters -> V.imap
+          (\loc d -> gradientReparam
+            d -- trusting compiler to recognize below is repeated for each c
+            (1, V.map (V.sum . V.map (V.! loc)) betaLikes, betaSamples)
+          )
+          clusters
+        )
+        betassN
+      )
+ where
+  thetas = V.map dist thetasN
+  betass = V.map (V.map dist) betassN
 
 nLocs :: Int
 nLocs = 1 -- 9 * 36
@@ -482,19 +475,20 @@ mixedFit xs = runST $ do
   let nSamp      = 10
   let nObs       = (100 :: Int)
   -- let localStep  = 20
+  let std        = 0.1
   qBetas <- known =<< V.generateM
     nStates
     (\i ->
-      let mu' = if i == 0 then 2 else 3
+      let mu' = if i == 0 then 0 else 5
       in  V.replicateM
             nLocs
             (do
-                                                          -- mu <- resample priorBeta gen1
+                                                                                                                      -- mu <- resample priorBeta gen1
               return
-                (defaultNormalDist { dist    = normalDistr mu' (1.0 :: Double)
+                (defaultNormalDist { dist    = normalDistr mu' (std :: Double)
                                    , maxStep = globalMaxStep
                                    , delta   = globalDelta -- 0.0000001
-                                   , prior   = normalDistr mu' (1.0 :: Double) -- priorBeta
+                                   , prior   = normalDistr mu' (4.0 :: Double) -- priorBeta
                                    , weight  = 1
                                    }
                 )
@@ -508,7 +502,7 @@ mixedFit xs = runST $ do
                                    }
     )
   (\tP bPs -> watch tP $ \theta' -> with bPs $ \betas' -> do
-      (upTh, upB) <- mixedLike nSamp nObs 1.0 gen1 xs theta' betas'
+      (upTh, upB) <- mixedLike nSamp nObs std gen1 xs theta' betas'
       write bPs upB
       write tP  upTh
     )
@@ -519,7 +513,7 @@ mixedFit xs = runST $ do
   --       $ (\xs' -> do
   --           bPs <- known =<< (V.map (initLocal localStep) <$> unsafeContent bPs0)
   --           watch bPs $ \betas' -> do
-  --             (_upTh, upB) <- mixedLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
+  --             (_upTh, upB) <- mixedLikeScore nSamp nObs std gen1 xs' theta' betas'
   --             write bPs upB
   --           bPsNew <- unsafeContent bPs
   --           write bPs0 bPsNew
@@ -536,7 +530,7 @@ mixedFit xs = runST $ do
   --             $ (\theta' -> do
   --                 (upTh, _upB) <- mixedLikeScore nSamp
   --                                                nObs
-  --                                                1.0
+  --                                                strd
   --                                                gen1
   --                                                xs'
   --                                                theta'
