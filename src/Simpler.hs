@@ -77,13 +77,13 @@ norm = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 1000
+globalMaxStep = 2
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
 globalEta :: Double
-globalEta = 0.1 -- 0.1 --10.0
+globalEta = 0.0 -- 0.1 --10.0
 
 type Gradient = V.Vector Double
 type Memory = V.Vector Double
@@ -470,22 +470,22 @@ genMixed = do
 mixedFit xs = runST $ do
   genG <- create
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
-  let priorTheta = dirichlet (V.replicate nStates 0.1)
+  let priorTheta = dirichlet (V.replicate nStates 1.0)
   -- let priorBeta  = normalDistr 0.0 4.0
-  let nSamp      = 10
+  let nSamp      = 100
   let nObs       = (100 :: Int)
   -- let localStep  = 20
   let std        = 0.1
   qBetas <- known =<< V.generateM
     nStates
     (\i ->
-      let mu' = if i == 0 then 0 else 5
+      let mu' = if i == 0 then -1 else 1
       in  V.replicateM
             nLocs
             (do
-                                                                                                                      -- mu <- resample priorBeta gen1
+                                                                                                                                                                                                              -- mu <- resample priorBeta gen1
               return
-                (defaultNormalDist { dist    = normalDistr mu' (std :: Double)
+                (defaultNormalDist { dist    = normalDistr mu' 1.0 -- (std :: Double)
                                    , maxStep = globalMaxStep
                                    , delta   = globalDelta -- 0.0000001
                                    , prior   = normalDistr mu' (4.0 :: Double) -- priorBeta
@@ -564,6 +564,7 @@ someFunc = do
   -- let xs = runST $ genDirichlet
   -- putStrLn (show $ dirichletFit xs)
   let xs = runST $ genMixed
+  putStrLn . unlines . fmap show . V.toList $ xs
   putStrLn (show $ mixedFit xs)
 -- >>> someFunc
 --
