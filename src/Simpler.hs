@@ -440,7 +440,7 @@ minimumDouble =
   where intList = [-100, -101 ..]
 
 minimumProb :: (Floating a, Ord a) => a -> a
-minimumProb = max 1e-308
+minimumProb = max 1e-154
 
 mixedLikeScore nSamp nObs std gen obss thetasN betassN = do
   thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
