@@ -181,7 +181,7 @@ defaultDirichlet prior =
         (rhoKuc defaultKucP)
   )
 
-dirichlet xs = Diri $ xs
+dirichlet xs = Diri $ V.map minimumProb xs
 
 alphas :: Dirichlet -> V.Vector Double
 alphas (Diri xs) = xs
@@ -190,19 +190,16 @@ logB :: Dirichlet -> Double
 logB d = V.sum (V.map logGamma as) - logGamma (V.sum as) where as = alphas d
 
 instance DistUtil Dirichlet where
-  nParams = V.length . alphas
-  fromParamVector xs = dirichlet $ V.map exp xs
-  toParamVector (Diri xs) = V.map log xs
+  nParams         = V.length . alphas
+  fromParamVector = dirichlet
+  toParamVector   = alphas
 
 instance Dist Dirichlet SampleVector where
   resample d gen = MWCD.dirichlet (alphas d) gen
   logProb d cat = V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) as cat)
     - logB d
     where as = alphas d
-  paramGradOfLogQ d cat = V.zipWith
-    (\a x -> a * (summed - digamma a + log x))
-    as
-    cat
+  paramGradOfLogQ d cat = V.zipWith (\a x -> summed - digamma a + log x) as cat
    where
     as     = alphas d
     summed = digamma (V.sum as)
@@ -221,11 +218,11 @@ defaultNormalDist =
 
 data NormalDist = ND {mean :: Double, stdDev :: Double} deriving (Show, Eq, Ord, Read)
 
-normalDistr mu std = ND mu std
+normalDistr mu std = ND mu (minimumProb std)
 
 instance DistUtil NormalDist where
-  fromParamVector xs = normalDistr (xs V.! 0) (exp (xs V.! 1))
-  toParamVector d = V.fromList [mean d, log (stdDev d)]
+  fromParamVector xs = normalDistr (xs V.! 0) (xs V.! 1)
+  toParamVector d = V.fromList [mean d, stdDev d]
   nParams _d = 2
 
 instance Dist NormalDist SampleDouble where
@@ -236,14 +233,15 @@ instance Dist NormalDist SampleDouble where
     sd         = stdDev d
     ndPdfDenom = log $ m_sqrt_2_pi * sd
   paramGradOfLogQ d x = V.fromList
-    [(x - mu) / std, 1 / std ^ (2 :: Int) * (x - mu) ^ (2 :: Int) - 1]
+    [xm / std, 1 / std ^ (3 :: Int) * (xm ^ (2 :: Int) - std ^ (3 :: Int))]
    where
-    mu  = mean d
     std = stdDev d
+    xm  = x - mean d
 -- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
 -- [2.0,3.0]
+
 -- >>> grad (\[mu, omega] -> diffableNormalLogProb mu (exp omega) (auto 2.0)) [0.0, log 1.0] :: [Double]
--- <interactive>:129:8-70: warning: [-Wincomplete-uni-patterns]
+-- <interactive>:1440:8-70: warning: [-Wincomplete-uni-patterns]
 --     Pattern match(es) are non-exhaustive
 --     In a lambda abstraction:
 --         Patterns not matched:
@@ -251,6 +249,7 @@ instance Dist NormalDist SampleDouble where
 --             [_]
 --             (_:_:_:_)
 -- [2.0,3.0]
+
 
 diffableNormalLogProb mu sd x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
  where
@@ -261,7 +260,7 @@ instance Differentiable NormalDist SampleDouble where
   transform d eps = mean d + stdDev d * eps
   epsilon _d gen = MWCD.standard gen
   sampleGradOfLogQ d z = -(z - mean d) / (stdDev d ** 2)
-  gradTransform d eps = V.fromList [1.0, eps * stdDev d] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
+  gradTransform d eps = V.fromList [1.0, eps] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
 -- >>> (transform (normalDistr 0.0 2.0) 1.0 :: Double)
 -- 2.0
 -- >>> gradTransform (normalDistr 0.0 1.0) (2.0 :: Double)
@@ -336,7 +335,6 @@ initLocal step p = p { maxStep = time p + step }
 initLocalDefault p = initLocal (maxStep p) p
 
 unsafeContent = (fromMaybe (error "impos") <$>) . content
-
 
 -- mixed membership
 mixedLike nSamp nObs std gen obss thetasN betassN = do
@@ -424,9 +422,25 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
   thetas = V.map dist thetasN
   betass = V.map (V.map dist) betassN
 
-logSum v1 = log . minimumP . V.sum . V.map exp . V.zipWith (+) v1
+logSum v1 = log . minimumProb . V.sum . V.map exp . V.zipWith (+) v1
 
-minimumP x = max x 1e-308
+-- | should dynamically run below to figure out the range
+-- >>> minimumDouble
+-- -323.0
+minimumDouble =
+  ( (+ 1)
+    . head
+    . dropWhile (not . isInfinite . log . ((10 :: Double) **))
+    $ intList
+  , (+ 1)
+    . head
+    . dropWhile (not . isInfinite . ((1 :: Double) /) . (10 **))
+    $ intList
+  )
+  where intList = [-100, -101 ..]
+
+minimumProb :: (Floating a, Ord a) => a -> a
+minimumProb = max 1e-308
 
 mixedLikeScore nSamp nObs std gen obss thetasN betassN = do
   thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
@@ -521,7 +535,7 @@ mixedFit xs = runST $ do
       in  V.replicateM
             nLocs
             (do
-                                                                                                                                                                                                                                                                                                                                              -- mu <- resample priorBeta gen1
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  -- mu <- resample priorBeta gen1
               return
                 (defaultNormalDist { dist    = normalDistr mu' 1.0 -- (std :: Double)
                                    , maxStep = globalMaxStep
