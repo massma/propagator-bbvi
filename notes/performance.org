@@ -665,37 +665,37 @@ sys	0m0.160s
 
 Compilation finished at Wed Dec 11 22:13:31
 * first crack at mixed membership
-** N = 1000, informative start
-(1000.0,[1000.0,1000.0],[-2.5165199728997107,2.502110379617441],[1.9493298589640817,0.10017664323479762])
- 132,886,805,288 bytes allocated in the heap
-  55,540,403,064 bytes copied during GC
-     317,981,016 bytes maximum residency (252 sample(s))
-       5,245,248 bytes maximum slop
-             303 MB total memory in use (0 MB lost due to fragmentation)
+** N = 100, start -1 1.
+(100.0,[100.0,100.0],[-2.5089110029101835,2.4893498782367156],[0.19795165139248716,0.19030274170338948])
+  17,084,919,656 bytes allocated in the heap
+   8,023,471,296 bytes copied during GC
+      35,151,616 bytes maximum residency (161 sample(s))
+       1,336,096 bytes maximum slop
+              33 MB total memory in use (0 MB lost due to fragmentation)
 
                                      Tot time (elapsed)  Avg pause  Max pause
-  Gen  0     127035 colls, 127035 par   168.496s  54.035s     0.0004s    0.0118s
-  Gen  1       252 colls,   251 par   24.041s   6.245s     0.0248s    0.1045s
+  Gen  0     16254 colls, 16254 par   12.452s   3.465s     0.0002s    0.0018s
+  Gen  1       161 colls,   160 par    3.450s   0.921s     0.0057s    0.0117s
 
-  Parallel GC work balance: 32.48% (serial 0%, perfect 100%)
+  Parallel GC work balance: 36.87% (serial 0%, perfect 100%)
 
   TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
 
   SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
 
-  INIT    time    0.002s  (  0.001s elapsed)
-  MUT     time   53.839s  ( 65.316s elapsed)
-  GC      time  192.538s  ( 60.280s elapsed)
-  EXIT    time    0.001s  (  0.004s elapsed)
-  Total   time  246.380s  (125.601s elapsed)
+  INIT    time    0.001s  (  0.001s elapsed)
+  MUT     time    5.157s  (  5.887s elapsed)
+  GC      time   15.901s  (  4.386s elapsed)
+  EXIT    time    0.001s  (  0.007s elapsed)
+  Total   time   21.060s  ( 10.280s elapsed)
 
-  Alloc rate    2,468,218,857 bytes per MUT second
+  Alloc rate    3,313,054,087 bytes per MUT second
 
-  Productivity  21.9% of total user, 52.0% of total elapsed
+  Productivity  24.5% of total user, 57.3% of total elapsed
 
 
-real	2m5.848s
-user	4m6.548s
-sys	1m18.568s
+real	0m10.452s
+user	0m21.213s
+sys	0m4.694s
 
-Compilation finished at Sat Dec 14 17:20:17
+Compilation finished at Sat Dec 14 22:47:09
