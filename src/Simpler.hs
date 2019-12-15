@@ -424,7 +424,9 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
   thetas = V.map dist thetasN
   betass = V.map (V.map dist) betassN
 
-logSum v1 = log . V.sum . V.map exp . V.zipWith (+) v1
+logSum v1 = log . minimumP . V.sum . V.map exp . V.zipWith (+) v1
+
+minimumP x = max x 1e-308
 
 mixedLikeScore nSamp nObs std gen obss thetasN betassN = do
   thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
@@ -508,7 +510,7 @@ mixedFit xs = runST $ do
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
   let priorTheta = dirichlet (V.replicate nStates 1.0)
   -- let priorBeta  = normalDistr 0.0 4.0
-  let nSamp      = 10
+  let nSamp      = 100
   let nObs       = (100 :: Int)
   -- let localStep  = 20
   let std        = 0.1
@@ -519,7 +521,7 @@ mixedFit xs = runST $ do
       in  V.replicateM
             nLocs
             (do
-                                                                                                                                                                                                                                                                                                                              -- mu <- resample priorBeta gen1
+                                                                                                                                                                                                                                                                                                                                              -- mu <- resample priorBeta gen1
               return
                 (defaultNormalDist { dist    = normalDistr mu' 1.0 -- (std :: Double)
                                    , maxStep = globalMaxStep
