@@ -49,6 +49,7 @@ import           System.Random.MWC              ( create
 import qualified Statistics.Sample             as StSa
 import qualified System.Random.MWC.Distributions
                                                as MWCD
+import           Text.Printf                    ( printf )
 
 type SampleVector = V.Vector Double
 
@@ -77,13 +78,13 @@ norm = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 2
+globalMaxStep = 100
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
 globalEta :: Double
-globalEta = 0.0 -- 0.1 --10.0
+globalEta = 0.1 -- 0.1 --10.0
 
 type Gradient = V.Vector Double
 type Memory = V.Vector Double
@@ -120,7 +121,7 @@ instance DistUtil a => Propagated (PropNode a) where
       )
       where newQ = V.zipWith (+) (toParamVector dist) gradientUpdate
   merge (U _ _) _ = Contradiction mempty "Trying to update a gradient"
--- | CAREFUL: below is dangerous if I start doing the ideas i thought
+-- CAREFUL: below is dangerous if I start doing the ideas i thought
 -- about: changing maxstep and elta node for local optmizations
   merge node1@(Node{}) node2@(Node{})
     | time node1 >= maxStep node1
@@ -343,13 +344,13 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
   betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
   let
     (thetaLikes, gradLikesTranspose) = V.unzip $ V.zipWith
-      (\eps ths -> V.unzip $ V.zipWith
-        (\obs th ->
-          let aThs = V.map log th
-          in
-            -- here grad is vector of loc x cluster, we want cluster x loc
-            V.foldl1' (\(l1, g1) (l2, g2) -> (l1 + l2, V.zipWith (+) g1 g2))
-              $ V.imap
+      (\eps ths ->
+        let
+          (fulLikes, unSummedGradTs) = V.unzip $ V.zipWith
+            (\obs th ->
+              let
+                aThs           = V.map log th
+                (likes, gradT) = V.unzip $ V.imap
                   (\i ob -> grad'
                     (\bs -> logSum
                       (V.map auto aThs)
@@ -361,12 +362,47 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
                     (V.map (\v -> transform (v V.! i) eps) betass)
                   )
                   obs
-        )
-        (obss :: V.Vector (V.Vector Double)) -- Maybe Double
-        ths
+              in
+                (V.sum likes, gradT)
+            )
+            (obss :: V.Vector (V.Vector Double)) -- Maybe Double
+            ths
+        in  (fulLikes, V.foldl1' (V.zipWith (V.zipWith (+))) unSummedGradTs)
       )
       betaSamples
       thetaSamples
+  -- _ <- error (printf "beta at sample 11 :%f" (betaSamples V.! 11))
+  -- _ <- error (show (thetaLikes V.! 11))
+  -- _ <- error (show (gradLikesTranspose V.! 11))
+  -- _ <- error (show ( V.! 11))
+  V.imapM_
+    (\s v -> V.imapM_
+      (\i x -> if isNaN x
+        then error (printf "theta at sample %d and obs %d is nan" s i)
+        else return ()
+      )
+      v
+    )
+    thetaLikes
+  V.imapM_
+    (\s v -> V.imapM_
+      (\l v2 -> V.imapM
+        (\c x -> if isNaN x
+          then
+            error
+              (printf "beta at sample %d and, cluster %d , andloc %d is nan"
+                      s
+                      c
+                      l
+              )
+          else return ()
+        )
+        v2
+      )
+      v
+    )
+    gradLikesTranspose
+
   return
     $ ( V.imap
         (\i d -> gradientScore
@@ -472,7 +508,7 @@ mixedFit xs = runST $ do
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
   let priorTheta = dirichlet (V.replicate nStates 1.0)
   -- let priorBeta  = normalDistr 0.0 4.0
-  let nSamp      = 100
+  let nSamp      = 10
   let nObs       = (100 :: Int)
   -- let localStep  = 20
   let std        = 0.1
@@ -483,7 +519,7 @@ mixedFit xs = runST $ do
       in  V.replicateM
             nLocs
             (do
-                                                                                                                                                                                                              -- mu <- resample priorBeta gen1
+                                                                                                                                                                                                                                                                                                                              -- mu <- resample priorBeta gen1
               return
                 (defaultNormalDist { dist    = normalDistr mu' 1.0 -- (std :: Double)
                                    , maxStep = globalMaxStep

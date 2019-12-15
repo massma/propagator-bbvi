@@ -39,7 +39,7 @@ resolver: lts-14.16
 # using the same syntax as the packages field.
 # (e.g., acme-missiles-0.3)
 extra-deps:
-- haskell-src-exts-1.22.0@sha256:f558923a9c8f57402c33a8cc871b934027a5c65414404c87239f6cbd7357d54e
+- haskell-src-exts-1.21.1@sha256:11d18ec3f463185f81b7819376b532e3087f8192cffc629aac5c9eec88897b35,4541
 - git: https://github.com/ekmett/propagators.git
   commit: 6de416c68d7970d734dc139079337a20b078e45c
 
