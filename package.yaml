@@ -31,18 +31,18 @@ dependencies:
 library:
   source-dirs: src
 
-default-extensions:
-- NoImplicitPrelude
-- DeriveGeneric
-- BangPatterns
-- OverloadedStrings
-- FlexibleInstances # this one lets use use types in instances
-- LambdaCase
-- TupleSections
-- RankNTypes
-- FlexibleContexts # this lets you put specific types within a typeclass
-- RecordWildCards
-- TypeSynonymInstances # lets you define instances on type synonyms
+# default-extensions:
+# - NoImplicitPrelude
+# - DeriveGeneric
+# - BangPatterns
+# - OverloadedStrings
+# - FlexibleInstances # this one lets use use types in instances
+# - LambdaCase
+# - TupleSections
+# - RankNTypes
+# - FlexibleContexts # this lets you put specific types within a typeclass
+# - RecordWildCards
+# - TypeSynonymInstances # lets you define instances on type synonyms
 
 executables:
   propagator-bbvi-exe:
@@ -52,7 +52,7 @@ executables:
     - -threaded
     - -rtsopts
     - -O2
-    - "\"-with-rtsopts=-N4 -M4000m\""
+    - "\"-with-rtsopts=-N4 -M10000m\""
 
     dependencies:
     - propagator-bbvi

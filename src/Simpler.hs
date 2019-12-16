@@ -1,26 +1,6 @@
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Simpler
   ( someFunc
-  , Differentiable(..)
-  , Dist(..)
-  , Dirichlet(..)
-  , defaultDirichlet
-  , dirichlet
-  , NormalDist(..)
-  , defaultNormalDist
-  , normalDistr
-  , Obs(..)
-  , defaultObs
-  , PropNode(..)
-  , PropNodes
-  , gradientScore
-  , gradientReparam
-  , unsafeContent
-
-  -- * probably ones we want to remove
-  , globalMaxStep
-  , globalDelta
   )
 where
 import           Prelude
@@ -44,294 +24,15 @@ import           System.Random.MWC              ( create
                                                 , GenST
                                                 , uniformR
                                                 )
--- import Statistics.Distribution
--- import Statistics.Distribution.Normal
 import qualified Statistics.Sample             as StSa
 import qualified System.Random.MWC.Distributions
                                                as MWCD
 import           Text.Printf                    ( printf )
-
-type SampleVector = V.Vector Double
-
-type SampleDouble = Double
-
-type ParamVector = V.Vector Double
-
-class DistUtil a where
-  fromParamVector :: ParamVector -> a
-  toParamVector :: a -> ParamVector
-  nParams :: a -> Int
-
-class DistUtil a => Dist a c where
-  resample :: a -> GenST s -> ST s c
-  logProb :: a -> c -> Double
-  paramGradOfLogQ ::  a -> c -> ParamVector -- gradient of parameters evauated at some sample of x
-
-class (Dist a c) => Differentiable a c where
-  gradTransform :: a -> c -> ParamVector
-  sampleGradOfLogQ ::  a -> c -> c -- gradient of a sample evaluate with params of q
-  transform :: a -> c -> c
-  epsilon ::  a -> GenST s -> ST s c
-
-norm = sqrt . V.sum . V.map (^ (2 :: Int))
+import           Statistics.BBVI
 
 type Time = Int
 
-globalMaxStep :: Time
-globalMaxStep = 10000
-
-globalDelta :: Double
-globalDelta = 1e-16 -- 0.00001 --
-
-globalEta :: Double
-globalEta = 1 -- 0.1 --10.0
-
-type Gradient = V.Vector Double
-type Memory = V.Vector Double
-
 type Samples = V.Vector
-
-data PropNode a
-  = U { memoryUpdate :: !(V.Vector Double)
-      , gradientUpdate :: !(V.Vector Double) }
-  | Node { time :: !Time
-         , maxStep :: !Time
-         , delta :: !Double
-         , memory :: !(V.Vector Double)
-         , weight :: !Double
-         , dist :: !a
-         , prior :: !a
-         , rhoF :: !(Gradient -> PropNode a -> (Memory, Gradient)) }
-
-type PropNodes a = V.Vector (PropNode a)
-
-type PropNodess a = V.Vector (V.Vector (PropNode a))
-
-instance DistUtil a => Propagated (PropNode a) where
-  merge node@(Node {..}) (U {..})
-    | norm gradientUpdate < delta = Change False node
-    | time >= maxStep             = Change False node
-    | otherwise                   = Change True updateNode
-   where
-    updateNode =
-      (node { time   = time + 1
-            , memory = V.zipWith (+) memory memoryUpdate
-            , dist   = fromParamVector newQ
-            }
-      )
-      where newQ = V.zipWith (+) (toParamVector dist) gradientUpdate
-  merge (U _ _) _ = Contradiction mempty "Trying to update a gradient"
--- CAREFUL: below is dangerous if I start doing the ideas i thought
--- about: changing maxstep and elta node for local optmizations
-  merge node1@(Node{}) node2@(Node{})
-    | time node1 >= maxStep node1
-    = Change False node1
-    | (time node2 > time node1)
-      && (  norm
-             (V.zipWith (-)
-                        (toParamVector $ dist node1)
-                        (toParamVector $ dist node2)
-             )
-         >= (delta node1)
-         )
-    = Change True (node2 { maxStep = maxStep node1, delta = delta node1 })
-    | otherwise
-    = Change False node1
-
-instance DistUtil a => Propagated (PropNodes a) where
-  merge nodes updates = V.sequence $ V.zipWith merge nodes updates
-
-instance DistUtil a => Propagated (PropNodess a) where
-  merge nodes updates = V.sequence $ V.zipWith merge nodes updates
-
-newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
-
-defaultObs :: V.Vector Double -> PropNode (Obs Double)
-defaultObs xs =
-  (Node 1
-        globalMaxStep
-        globalDelta
-        (V.empty)
-        0
-        (O xs)
-        (O V.empty)
-        (\_x1 _x2 -> (V.empty, V.empty))
-  )
-
-instance Dist (Obs Double) Double where
-  resample (O d) gen = return . (d V.!) =<< uniformR (0, (V.length d - 1)) gen
-  logProb _d _x = 0
-  paramGradOfLogQ _d _x = V.empty
-
-instance DistUtil (Obs Double) where
-  nParams _x = 0
-  toParamVector _ = V.empty
-  fromParamVector _ = O V.empty
-
-newtype Dirichlet = Diri (V.Vector Double) deriving (Show, Eq, Ord, Read)
-
-defaultDirichlet prior =
-  (Node 1
-        globalMaxStep
-        globalDelta
-        (fmap (const 0.0) (toParamVector prior))
-        1
-        prior
-        prior
-        (rhoKuc defaultKucP)
-  )
-
-dirichlet xs = Diri $ V.map (max 1e-100) xs
-
-alphas :: Dirichlet -> V.Vector Double
-alphas (Diri xs) = xs
-
-logB :: Dirichlet -> Double
-logB d = V.sum (V.map logGamma as) - logGamma (V.sum as) where as = alphas d
-
-instance DistUtil Dirichlet where
-  nParams         = V.length . alphas
-  fromParamVector = dirichlet
-  toParamVector   = alphas
-
-instance Dist Dirichlet SampleVector where
-  resample d gen = MWCD.dirichlet (alphas d) gen
-  logProb d cat = V.sum (V.zipWith (\alpha x -> (alpha - 1) * log x) as cat)
-    - logB d
-    where as = alphas d
-  paramGradOfLogQ d cat = V.zipWith (\a x -> summed - digamma a + log x) as cat
-   where
-    as     = alphas d
-    summed = digamma (V.sum as)
-
-defaultNormalDist =
-  (Node 1
-        globalMaxStep
-        globalDelta
-        (V.replicate (nParams dflt) 0)
-        1
-        dflt
-        dflt
-        (rhoKuc defaultKucP)
-  )
-  where dflt = (normalDistr 0 1)
-
-data NormalDist = ND {mean :: Double, stdDev :: Double} deriving (Show, Eq, Ord, Read)
-
-normalDistr mu std = ND mu (max 1e-100 std)
-
-instance DistUtil NormalDist where
-  fromParamVector xs = normalDistr (xs V.! 0) (xs V.! 1)
-  toParamVector d = V.fromList [mean d, stdDev d]
-  nParams _d = 2
-
-instance Dist NormalDist SampleDouble where
-  resample d gen = MWCD.normal (mean d) (stdDev d) gen
-  logProb d x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
-   where
-    xm         = x - mean d
-    sd         = stdDev d
-    ndPdfDenom = log $ m_sqrt_2_pi * sd
-  paramGradOfLogQ d x = V.fromList
-    [ xm / std ^ (2 :: Int)
-    , 1 / std ^ (3 :: Int) * (xm ^ (2 :: Int) - std ^ (2 :: Int))
-    ]
-   where
-    std = stdDev d
-    xm  = x - mean d
--- >>> paramGradOfLogQ (normalDistr 0.0 3.0) (2.0 :: Double)
--- [0.2222222222222222,-0.18518518518518517]
-
--- >>> grad (\[mu, omega] -> diffableNormalLogProb mu omega (auto 2.0)) [0.0, 3.0] :: [Double]
--- <interactive>:4316:8-64: warning: [-Wincomplete-uni-patterns]
---     Pattern match(es) are non-exhaustive
---     In a lambda abstraction:
---         Patterns not matched:
---             []
---             [_]
---             (_:_:_:_)
--- [0.2222222222222222,-0.18518518518518523]
-
-
-diffableNormalLogProb mu sd x = -xm * xm / (2 * sd * sd) - ndPdfDenom
- where
-  xm         = x - mu
-  ndPdfDenom = log $ sqrt (2 * pi) * sd
-
-instance Differentiable NormalDist SampleDouble where
-  transform d eps = mean d + stdDev d * eps
-  epsilon _d gen = MWCD.standard gen
-  sampleGradOfLogQ d z = -(z - mean d) / (stdDev d ** 2)
-  gradTransform d eps = V.fromList [1.0, eps] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
--- >>> (transform (normalDistr 0.0 2.0) 1.0 :: Double)
--- 2.0
--- >>> gradTransform (normalDistr 0.0 1.0) (2.0 :: Double)
--- [1.0,2.0]
-
-gradientScore
-  :: Dist a c
-  => PropNode a
-  -> (Double, V.Vector Double, Samples c)
-  -> PropNode a
-gradientScore = gradient f
- where
-  f Node {..} nFactors s l = fmap
-    (* (l + nFactors / weight * (logProb prior s - logProb dist s)))
-    (paramGradOfLogQ dist s)
-
-gradient f q@(Node {..}) (nFactors, like, samples) = U
-  memory'
-  (V.zipWith (*) rho' gr)
- where
-  summed =
-    V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0)
-      $ V.zipWith (f q nFactors) samples like
-  gr              = fmap (/ (fromIntegral $ V.length samples)) summed
-  (memory', rho') = rhoF gr q
-
--- | TODO: speed up by calc length in one pass
-gradientReparam
-  :: (Differentiable a Double)
-  => PropNode a
-  -> (Double, V.Vector Double, Samples Double)
-  -> PropNode a
-gradientReparam = gradient f
- where
-  f Node {..} nFactors s l = fmap
-    (* ( l
-       + nFactors
-       / weight
-       * ( sampleGradOfLogQ prior (transform dist s)
-         - sampleGradOfLogQ dist  (transform dist s)
-         )
-       )
-    )
-    (gradTransform dist s)
-
-rhoKuc KucP {..} gra Node {..} =
-  ( deltaM
-  , V.zipWith
-    (\ds s ->
-      eta
-        *  (fromIntegral time)
-        ** (negate 0.5 + eps)
-        *  (1.0 / (tau + sqrt (s + ds)))
-    )
-    deltaM
-    memory
-  )
- where
-  deltaM = V.zipWith (\g s -> alpha * g ^ (2 :: Int) - alpha * s) gra memory
-
-data KucP = KucP
-  { alpha :: Double
-  , eta :: Double
-  , tau :: Double
-  , eps :: Double
-  } deriving (Show, Eq, Ord, Read)
-
--- | eta is what you probably want to tune: kucukelbir trys 0.01 0.1 1 10 100
-defaultKucP = KucP { alpha = 0.1, eta = globalEta, tau = 1.0, eps = 1e-16 }
 
 initLocal step p = p { maxStep = time p + step }
 initLocalDefault p = initLocal (maxStep p) p
@@ -339,58 +40,58 @@ initLocalDefault p = initLocal (maxStep p) p
 unsafeContent = (fromMaybe (error "impos") <$>) . content
 
 -- mixed membership
-mixedLike nSamp nObs std gen obss thetasN betassN = do
-  thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
-  betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
-  let
-    (thetaLikes, gradLikesTranspose) = V.unzip $ V.zipWith
-      (\eps ths ->
-        let
-          (fulLikes, unSummedGradTs) = V.unzip $ V.zipWith
-            (\obs th ->
-              let
-                aThs           = V.map log th
-                (likes, gradT) = V.unzip $ V.imap
-                  (\i ob -> grad'
-                    (\bs -> logSum
-                      (V.map auto aThs)
-                      (V.map
-                        (\mu -> diffableNormalLogProb mu (auto std) (auto ob))
-                        bs
-                      )
-                    )
-                    (V.map (\v -> transform (v V.! i) eps) betass)
-                  )
-                  obs
-              in
-                (V.sum likes, gradT)
-            )
-            (obss :: V.Vector (V.Vector Double)) -- Maybe Double
-            ths
-        in  (fulLikes, V.foldl1' (V.zipWith (V.zipWith (+))) unSummedGradTs)
-      )
-      betaSamples
-      thetaSamples
-  return
-    $ ( V.imap
-        (\i d -> gradientScore
-          d
-          (1, V.map (V.! i) thetaLikes, (V.map (V.! i) thetaSamples))
-        )
-        thetasN
-      , V.imap
-        (\c clusters -> V.imap
-          (\loc d -> gradientReparam
-            d
-            (1, V.map ((V.! c) . (V.! loc)) gradLikesTranspose, betaSamples)
-          )
-          clusters
-        )
-        betassN
-      )
- where
-  thetas = V.map dist thetasN
-  betass = V.map (V.map dist) betassN
+-- mixedLike nSamp nObs std gen obss thetasN betassN = do
+--   thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
+--   betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
+--   let
+--     (thetaLikes, gradLikesTranspose) = V.unzip $ V.zipWith
+--       (\eps ths ->
+--         let
+--           (fulLikes, unSummedGradTs) = V.unzip $ V.zipWith
+--             (\obs th ->
+--               let
+--                 aThs           = V.map log th
+--                 (likes, gradT) = V.unzip $ V.imap
+--                   (\i ob -> grad'
+--                     (\bs -> logSum
+--                       (V.map auto aThs)
+--                       (V.map
+--                         (\mu -> diffableNormalLogProb mu (auto std) (auto ob))
+--                         bs
+--                       )
+--                     )
+--                     (V.map (\v -> transform (v V.! i) eps) betass)
+--                   )
+--                   obs
+--               in
+--                 (V.sum likes, gradT)
+--             )
+--             (obss :: V.Vector (V.Vector Double)) -- Maybe Double
+--             ths
+--         in  (fulLikes, V.foldl1' (V.zipWith (V.zipWith (+))) unSummedGradTs)
+--       )
+--       betaSamples
+--       thetaSamples
+--   return
+--     $ ( V.imap
+--         (\i d -> gradientScore
+--           d
+--           (1, V.map (V.! i) thetaLikes, (V.map (V.! i) thetaSamples))
+--         )
+--         thetasN
+--       , V.imap
+--         (\c clusters -> V.imap
+--           (\loc d -> gradientReparam
+--             d
+--             (1, V.map ((V.! c) . (V.! loc)) gradLikesTranspose, betaSamples)
+--           )
+--           clusters
+--         )
+--         betassN
+--       )
+--  where
+--   thetas = V.map dist thetasN
+--   betass = V.map (V.map dist) betassN
 
 logSum v1 = log . minimumProb . V.sum . V.map exp . V.zipWith (+) v1
 
