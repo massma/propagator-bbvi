@@ -78,7 +78,7 @@ norm = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 100
+globalMaxStep = 1000
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
@@ -181,7 +181,7 @@ defaultDirichlet prior =
         (rhoKuc defaultKucP)
   )
 
-dirichlet xs = Diri $ V.map minimumProb xs
+dirichlet xs = Diri $ V.map (max 1e-10) xs
 
 alphas :: Dirichlet -> V.Vector Double
 alphas (Diri xs) = xs
@@ -218,7 +218,7 @@ defaultNormalDist =
 
 data NormalDist = ND {mean :: Double, stdDev :: Double} deriving (Show, Eq, Ord, Read)
 
-normalDistr mu std = ND mu (minimumProb std)
+normalDistr mu std = ND mu (max 1e-10 std)
 
 instance DistUtil NormalDist where
   fromParamVector xs = normalDistr (xs V.! 0) (xs V.! 1)
@@ -233,25 +233,27 @@ instance Dist NormalDist SampleDouble where
     sd         = stdDev d
     ndPdfDenom = log $ m_sqrt_2_pi * sd
   paramGradOfLogQ d x = V.fromList
-    [xm / std, 1 / std ^ (3 :: Int) * (xm ^ (2 :: Int) - std ^ (3 :: Int))]
+    [ xm / std ^ (2 :: Int)
+    , 1 / std ^ (3 :: Int) * (xm ^ (2 :: Int) - std ^ (2 :: Int))
+    ]
    where
     std = stdDev d
     xm  = x - mean d
--- >>> paramGradOfLogQ (normalDistr 0.0 1.0) (2.0 :: Double)
--- [2.0,3.0]
+-- >>> paramGradOfLogQ (normalDistr 0.0 3.0) (2.0 :: Double)
+-- [0.2222222222222222,-0.18518518518518517]
 
--- >>> grad (\[mu, omega] -> diffableNormalLogProb mu (exp omega) (auto 2.0)) [0.0, log 1.0] :: [Double]
--- <interactive>:1440:8-70: warning: [-Wincomplete-uni-patterns]
+-- >>> grad (\[mu, omega] -> diffableNormalLogProb mu omega (auto 2.0)) [0.0, 3.0] :: [Double]
+-- <interactive>:4316:8-64: warning: [-Wincomplete-uni-patterns]
 --     Pattern match(es) are non-exhaustive
 --     In a lambda abstraction:
 --         Patterns not matched:
 --             []
 --             [_]
 --             (_:_:_:_)
--- [2.0,3.0]
+-- [0.2222222222222222,-0.18518518518518523]
 
 
-diffableNormalLogProb mu sd x = (-xm * xm / (2 * sd * sd)) - ndPdfDenom
+diffableNormalLogProb mu sd x = -xm * xm / (2 * sd * sd) - ndPdfDenom
  where
   xm         = x - mu
   ndPdfDenom = log $ sqrt (2 * pi) * sd
@@ -369,38 +371,6 @@ mixedLike nSamp nObs std gen obss thetasN betassN = do
       )
       betaSamples
       thetaSamples
-  -- _ <- error (printf "beta at sample 11 :%f" (betaSamples V.! 11))
-  -- _ <- error (show (thetaLikes V.! 11))
-  -- _ <- error (show (gradLikesTranspose V.! 11))
-  -- _ <- error (show ( V.! 11))
-  V.imapM_
-    (\s v -> V.imapM_
-      (\i x -> if isNaN x
-        then error (printf "theta at sample %d and obs %d is nan" s i)
-        else return ()
-      )
-      v
-    )
-    thetaLikes
-  V.imapM_
-    (\s v -> V.imapM_
-      (\l v2 -> V.imapM
-        (\c x -> if isNaN x
-          then
-            error
-              (printf "beta at sample %d and, cluster %d , andloc %d is nan"
-                      s
-                      c
-                      l
-              )
-          else return ()
-        )
-        v2
-      )
-      v
-    )
-    gradLikesTranspose
-
   return
     $ ( V.imap
         (\i d -> gradientScore
@@ -440,30 +410,32 @@ minimumDouble =
   where intList = [-100, -101 ..]
 
 minimumProb :: (Floating a, Ord a) => a -> a
-minimumProb = max 1e-154
+minimumProb = max 1e-308
 
 mixedLikeScore nSamp nObs std gen obss thetasN betassN = do
   thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
-  betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
-  let (thetaLikes, betaLikes) = V.unzip $ V.zipWith
-        (\eps ths -> V.unzip $ V.zipWith
-          (\obs th ->
-            let aThs   = V.map log th
-                logVec = V.imap
-                  (\i ob -> logSum
-                    aThs
-                    (V.map (\mu -> logProb (normalDistr mu std) ob)
-                           (V.map (\v -> transform (v V.! i) eps) betass)
-                    )
+  betaSamples  <- V.replicateM nSamp
+                               (V.mapM (V.mapM (\b -> resample b gen)) betass)
+  let
+    (thetaLikes, betaLikes) = V.unzip $ V.zipWith
+      (\bss ths -> V.unzip $ V.zipWith
+        (\obs th ->
+          let aThs   = V.map log th
+              logVec = V.imap
+                (\loc ob -> logSum
+                  aThs
+                  (V.map (\mu -> logProb (normalDistr mu std) ob)
+                         (V.map (V.! loc) bss)
                   )
-                  obs
-            in  (V.sum logVec, logVec)
-          )
-          (obss :: V.Vector (V.Vector Double)) -- Maybe Double
-          ths
+                )
+                obs
+          in  (V.sum logVec, logVec)
         )
-        betaSamples
-        thetaSamples
+        (obss :: V.Vector (V.Vector Double)) -- Maybe Double
+        ths
+      )
+      betaSamples
+      thetaSamples
   return
     $ ( V.imap
         (\i d -> gradientScore
@@ -472,10 +444,15 @@ mixedLikeScore nSamp nObs std gen obss thetasN betassN = do
         )
         thetasN
       , V.imap
-        (\_c clusters -> V.imap
-          (\loc d -> gradientReparam
-            d -- trusting compiler to recognize below is repeated for each c
-            (1, V.map (V.sum . V.map (V.! loc)) betaLikes, betaSamples)
+        (\c clusters -> V.imap
+          (\loc d -> gradientScore
+            d
+            -- trusting compiler to recognize below is repeated for each c
+            -- something is wrong belwo, before this was indexed by cluster but that came from grad
+            ( 1
+            , V.map (V.sum . V.map (V.! loc)) betaLikes
+            , V.map ((V.! loc) . (V.! c)) betaSamples
+            )
           )
           clusters
         )
@@ -535,7 +512,6 @@ mixedFit xs = runST $ do
       in  V.replicateM
             nLocs
             (do
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  -- mu <- resample priorBeta gen1
               return
                 (defaultNormalDist { dist    = normalDistr mu' 1.0 -- (std :: Double)
                                    , maxStep = globalMaxStep
@@ -554,7 +530,7 @@ mixedFit xs = runST $ do
                                    }
     )
   (\tP bPs -> watch tP $ \theta' -> with bPs $ \betas' -> do
-      (upTh, upB) <- mixedLike nSamp nObs std gen1 xs theta' betas'
+      (upTh, upB) <- mixedLikeScore nSamp nObs std gen1 xs theta' betas'
       write bPs upB
       write tP  upTh
     )
