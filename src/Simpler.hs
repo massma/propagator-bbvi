@@ -78,7 +78,7 @@ norm = sqrt . V.sum . V.map (^ (2 :: Int))
 type Time = Int
 
 globalMaxStep :: Time
-globalMaxStep = 1000
+globalMaxStep = 10000
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
