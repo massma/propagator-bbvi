@@ -84,7 +84,7 @@ globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
 globalEta :: Double
-globalEta = 0.1 -- 0.1 --10.0
+globalEta = 1 -- 0.1 --10.0
 
 type Gradient = V.Vector Double
 type Memory = V.Vector Double
@@ -181,7 +181,7 @@ defaultDirichlet prior =
         (rhoKuc defaultKucP)
   )
 
-dirichlet xs = Diri $ V.map (max 1e-10) xs
+dirichlet xs = Diri $ V.map (max 1e-100) xs
 
 alphas :: Dirichlet -> V.Vector Double
 alphas (Diri xs) = xs
@@ -218,7 +218,7 @@ defaultNormalDist =
 
 data NormalDist = ND {mean :: Double, stdDev :: Double} deriving (Show, Eq, Ord, Read)
 
-normalDistr mu std = ND mu (max 1e-10 std)
+normalDistr mu std = ND mu (max 1e-100 std)
 
 instance DistUtil NormalDist where
   fromParamVector xs = normalDistr (xs V.! 0) (xs V.! 1)
@@ -504,7 +504,7 @@ mixedFit xs = runST $ do
   let nSamp      = 100
   let nObs       = (100 :: Int)
   -- let localStep  = 20
-  let std        = 0.1
+  let std        = 1.0
   qBetas <- known =<< V.generateM
     nStates
     (\i ->
