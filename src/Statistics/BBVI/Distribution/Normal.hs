@@ -8,12 +8,10 @@ module Statistics.BBVI.Distribution.Normal
   )
 where
 
-
 import qualified Data.Vector                   as V
 import           Numeric.MathFunctions.Constants
                                                 ( m_sqrt_2_pi )
 import           Statistics.BBVI.Class
-import           Statistics.BBVI.Defaults
 import           Statistics.BBVI.StepSize
 import           Statistics.BBVI.Propagator     ( PropNode(..)
                                                 , SampleDouble
@@ -27,8 +25,8 @@ data NormalDist = ND {mean :: Double, stdDev :: Double} deriving (Show, Eq, Ord,
 
 defaultNormalDist =
   (Node 1
-        globalMaxStep
-        globalDelta
+        100000
+        1e-6
         (V.replicate (nParams dflt) 0)
         1
         dflt
@@ -60,17 +58,6 @@ instance Dist NormalDist SampleDouble where
     xm  = x - mean d
 -- >>> paramGradOfLogQ (normalDistr 0.0 3.0) (2.0 :: Double)
 -- [0.2222222222222222,-0.18518518518518517]
-
--- >>> grad (\[mu, omega] -> diffableNormalLogProb mu omega (auto 2.0)) [0.0, 3.0] :: [Double]
--- <interactive>:4316:8-64: warning: [-Wincomplete-uni-patterns]
---     Pattern match(es) are non-exhaustive
---     In a lambda abstraction:
---         Patterns not matched:
---             []
---             [_]
---             (_:_:_:_)
--- [0.2222222222222222,-0.18518518518518523]
-
 
 diffableNormalLogProb mu sd x = -xm * xm / (2 * sd * sd) - ndPdfDenom
  where

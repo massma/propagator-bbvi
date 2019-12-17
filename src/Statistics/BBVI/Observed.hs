@@ -9,9 +9,7 @@ where
 
 import qualified Data.Vector                   as V
 import           Statistics.BBVI.Class
-import           Statistics.BBVI.Defaults
 import           Statistics.BBVI.Propagator     ( PropNode(..) )
-import           Statistics.BBVI.Defaults
 import           System.Random.MWC              ( uniformR )
 
 newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
@@ -19,8 +17,8 @@ newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
 defaultObs :: V.Vector Double -> PropNode (Obs Double)
 defaultObs xs =
   (Node 1
-        globalMaxStep
-        globalDelta
+        100000 -- global max step
+        1e-5 -- delta
         (V.empty)
         0
         (O xs)

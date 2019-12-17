@@ -7,7 +7,6 @@ module Statistics.BBVI.StepSize
 where
 
 import qualified Data.Vector                   as V
-import           Statistics.BBVI.Defaults
 import           Statistics.BBVI.Propagator     ( PropNode(..) )
 
 rhoKuc KucP {..} gra Node {..} =
@@ -33,4 +32,4 @@ data KucP = KucP
   } deriving (Show, Eq, Ord, Read)
 
 -- | eta is what you probably want to tune: kucukelbir trys 0.01 0.1 1 10 100
-defaultKucP = KucP { alpha = 0.1, eta = globalEta, tau = 1.0, eps = 1e-16 }
+defaultKucP = KucP { alpha = 0.1, eta = 0.1, tau = 1.0, eps = 1e-16 }

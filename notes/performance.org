@@ -937,3 +937,71 @@ user	3m44.885s
 sys	0m54.526s
 
 Compilation finished at Tue Dec 17 13:52:06
+** reparam gradient with more obs
+(100.0,[100.0,100.0,100.0],[-0.43251633161468783,-9.542497150363976,-0.48219161229102736],[1.4689441753751824,0.9050921505453048,1.1868602904244805])
+ 542,389,814,400 bytes allocated in the heap
+  57,435,654,784 bytes copied during GC
+     180,311,112 bytes maximum residency (279 sample(s))
+       8,313,456 bytes maximum slop
+             171 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     526296 colls, 526296 par   249.055s  65.910s     0.0001s    0.0081s
+  Gen  1       279 colls,   278 par   33.262s   9.624s     0.0345s    0.0729s
+
+  Parallel GC work balance: 41.38% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.001s  (  0.000s elapsed)
+  MUT     time  172.083s  (198.317s elapsed)
+  GC      time  282.317s  ( 75.534s elapsed)
+  EXIT    time    0.001s  (  0.008s elapsed)
+  Total   time  454.401s  (273.860s elapsed)
+
+  Alloc rate    3,151,914,200 bytes per MUT second
+
+  Productivity  37.9% of total user, 72.4% of total elapsed
+
+
+real	4m34.054s
+user	7m34.560s
+sys	1m50.093s
+
+Compilation finished at Tue Dec 17 14:52:07
+* gaussian mixutre - prep for final project
+([1.5109587665510678,2.8577911466209813],10001,[10001,10001],[(4.868133928611128,0.33074879516897593),(-4.977728930943025,0.25192488815332315)])
+   1,745,338,680 bytes allocated in the heap
+      22,592,928 bytes copied during GC
+         558,752 bytes maximum residency (4 sample(s))
+          87,416 bytes maximum slop
+               0 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0      1680 colls,  1680 par    0.382s   0.056s     0.0000s    0.0001s
+  Gen  1         4 colls,     3 par    0.003s   0.001s     0.0002s    0.0003s
+
+  Parallel GC work balance: 3.67% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.001s  (  0.000s elapsed)
+  MUT     time    2.632s  (  2.718s elapsed)
+  GC      time    0.385s  (  0.057s elapsed)
+  EXIT    time    0.000s  (  0.005s elapsed)
+  Total   time    3.018s  (  2.780s elapsed)
+
+  Alloc rate    663,023,094 bytes per MUT second
+
+  Productivity  87.2% of total user, 97.7% of total elapsed
+
+
+real	0m2.949s
+user	0m3.174s
+sys	0m0.143s
+
+Compilation finished at Tue Dec 17 16:01:10

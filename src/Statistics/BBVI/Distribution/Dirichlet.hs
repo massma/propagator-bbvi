@@ -15,7 +15,6 @@ import           Numeric.SpecFunctions          ( logGamma
                                                 , digamma
                                                 )
 import           Statistics.BBVI.Class
-import           Statistics.BBVI.Defaults
 import           Statistics.BBVI.StepSize
 import           Statistics.BBVI.Propagator     ( PropNode(..)
                                                 , SampleVector
@@ -28,8 +27,8 @@ newtype Dirichlet = Diri (V.Vector Double) deriving (Show, Eq, Ord, Read)
 
 defaultDirichlet prior =
   (Node 1
-        globalMaxStep
-        globalDelta
+        100000
+        1e-6
         (fmap (const 0.0) (toParamVector prior))
         1
         prior
