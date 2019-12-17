@@ -1,7 +1,7 @@
 module Main where
 
-import Simpler
-import Prelude
+import           Statistics.BBVI.Examples
+import           Control.Monad.ST               ( runST )
 
 main :: IO ()
-main = someFunc
+main = let xs = runST $ genMixedMem in putStrLn (show $ mixedMemFit xs)

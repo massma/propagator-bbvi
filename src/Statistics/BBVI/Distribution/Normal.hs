@@ -4,6 +4,7 @@ module Statistics.BBVI.Distribution.Normal
   ( defaultNormalDist
   , NormalDist(..)
   , normalDistr
+  , diffableNormalLogProb
   )
 where
 

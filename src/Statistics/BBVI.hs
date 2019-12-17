@@ -6,12 +6,18 @@ module Statistics.BBVI
   , NormalDist(..)
   , normalDistr
   , defaultNormalDist
+  , diffableNormalLogProb
   , defaultDirichlet
   , dirichlet
+  , alphas
+  , defaultObs
+  , Obs(..)
   , gradientScore
   , gradientReparam
   , globalMaxStep
   , globalDelta
+  , SampleDouble
+  , SampleVector
   )
 where
 
