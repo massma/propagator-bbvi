@@ -41,7 +41,7 @@ minimumProb = max 1e-308
 
 --- useful global params
 globalMaxStep :: Int
-globalMaxStep = 10000
+globalMaxStep = 100000
 
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
@@ -126,33 +126,38 @@ mixtureLikeScore nSamp nObs std gen xsN thetaN betasN = do
 genMixture :: ST s (V.Vector Double)
 genMixture = do
   gen <- create
-  let theta' = MWCD.categorical (V.fromList [5.0, 10.0]) gen
+  let theta' = MWCD.categorical (V.replicate nState 1.0) gen
   let std    = 1.0
-  let mixtures =
-        V.fromList [MWCD.normal 5.0 std gen, MWCD.normal (-5.0) std gen]
-  xs <- V.replicateM 1000 ((mixtures V.!) =<< theta')
+  let
+    mixtures = V.generate
+      nState
+      (\k ->
+        (MWCD.normal
+          ((fromIntegral k - (fromIntegral (nState - 1) * 0.5)) * 5)
+          std
+          gen
+        )
+      )
+  xs <- V.replicateM nTime ((mixtures V.!) =<< theta')
   return xs
 
 mixtureFit xs = runST $ do
   genG <- create
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
-  let priorTheta = dirichlet (V.fromList [0.1, 0.1])
-  let priorBeta  = normalDistr 0.0 4.0
+  let priorTheta = dirichlet (V.replicate nState 1.0)
+  let priorBeta = normalDistr 0 (5 * (fromIntegral nState - 1) :: Double)
   let nSamp      = 10
   let nObs       = 100
   let localStep  = 20
-  let nClusters  = 2
   qBetas <- known =<< V.generateM
-    nClusters
+    nState
     (\i -> do
-         -- mu <- resample priorBeta gen1
-         -- really I am doing empiracle bayes here ( would do mu - 1std, mu + 1 std), this approach makes things easier for testing
-      let mu = if i == 0 then 2 else (negate 2)
+      mu <- resample priorBeta gen1
       return
         (defaultNormalDist { dist    = normalDistr mu (1.0 :: Double)
                            , maxStep = globalMaxStep
-                           , delta   = globalDelta -- 0.0000001
-                           , prior   = normalDistr mu (1.0 :: Double) -- priorBeta
+                           , delta   = globalDelta
+                           , prior   = priorBeta
                            , weight  = 1
                            }
         )
@@ -162,7 +167,8 @@ mixtureFit xs = runST $ do
     ( known
     $ ((defaultDirichlet priorTheta) { maxStep = globalMaxStep
                                      , delta   = globalDelta -- 0.0000001
-                                     , dist    = dirichlet (V.replicate 2 1.0) -- startTh
+                                     , dist    = dirichlet
+                                       (V.replicate nState 1.0) -- startTh
                                      , weight  = 1
                                      }
       )

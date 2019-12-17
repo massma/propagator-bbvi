@@ -972,6 +972,7 @@ sys	1m50.093s
 
 Compilation finished at Tue Dec 17 14:52:07
 * gaussian mixutre - prep for final project
+** with informative starting point and prio
 ([1.5109587665510678,2.8577911466209813],10001,[10001,10001],[(4.868133928611128,0.33074879516897593),(-4.977728930943025,0.25192488815332315)])
    1,745,338,680 bytes allocated in the heap
       22,592,928 bytes copied during GC
@@ -1005,3 +1006,37 @@ user	0m3.174s
 sys	0m0.143s
 
 Compilation finished at Tue Dec 17 16:01:10
+** with uninformative starting point and priors
+([2.1630847634639387,1.8763160078863612,2.336678530439356],100001,[100001,100001,100001],[(-4.764066153763586,0.39111683865516617),(5.2520934155953345,0.6441853229932916),(0.5785223611233787,0.5159643924566375)])
+  28,248,992,504 bytes allocated in the heap
+     467,679,808 bytes copied during GC
+       6,129,944 bytes maximum residency (34 sample(s))
+         210,664 bytes maximum slop
+               5 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     27054 colls, 27054 par    6.401s   0.888s     0.0000s    0.0002s
+  Gen  1        34 colls,    33 par    0.082s   0.023s     0.0007s    0.0021s
+
+  Parallel GC work balance: 11.93% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.001s  (  0.001s elapsed)
+  MUT     time   38.230s  ( 39.369s elapsed)
+  GC      time    6.483s  (  0.911s elapsed)
+  EXIT    time    0.001s  (  0.000s elapsed)
+  Total   time   44.715s  ( 40.280s elapsed)
+
+  Alloc rate    738,920,531 bytes per MUT second
+
+  Productivity  85.5% of total user, 97.7% of total elapsed
+
+
+real	0m40.457s
+user	0m44.888s
+sys	0m1.888s
+
+Compilation finished at Tue Dec 17 16:16:05
