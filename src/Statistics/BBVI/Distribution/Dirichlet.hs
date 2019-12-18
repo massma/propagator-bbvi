@@ -4,7 +4,6 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 module Statistics.BBVI.Distribution.Dirichlet
   ( alphas
-  , defaultDirichlet
   , dirichlet
   , Dirichlet(..)
   )
@@ -24,17 +23,6 @@ import qualified System.Random.MWC.Distributions
 
 
 newtype Dirichlet = Diri (V.Vector Double) deriving (Show, Eq, Ord, Read)
-
-defaultDirichlet prior =
-  (Node 1
-        100000
-        1e-6
-        (fmap (const 0.0) (toParamVector prior))
-        1
-        prior
-        prior
-        (rhoKuc defaultKucP)
-  )
 
 dirichlet xs = Diri $ V.map (max 1e-10) xs
 

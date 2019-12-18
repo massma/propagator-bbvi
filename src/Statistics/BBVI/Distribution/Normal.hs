@@ -1,8 +1,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 module Statistics.BBVI.Distribution.Normal
-  ( defaultNormalDist
-  , NormalDist(..)
+  ( NormalDist(..)
   , normalDistr
   , diffableNormalLogProb
   )
@@ -22,18 +21,6 @@ import           System.Random.MWC.Distributions
                                                 )
 
 data NormalDist = ND {mean :: Double, stdDev :: Double} deriving (Show, Eq, Ord, Read)
-
-defaultNormalDist =
-  (Node 1
-        100000
-        1e-6
-        (V.replicate (nParams dflt) 0)
-        1
-        dflt
-        dflt
-        (rhoKuc defaultKucP)
-  )
-  where dflt = (normalDistr 0 1)
 
 normalDistr mu std = ND mu (max 1e-10 std)
 

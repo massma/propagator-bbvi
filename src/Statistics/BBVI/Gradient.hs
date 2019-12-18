@@ -3,44 +3,66 @@
 module Statistics.BBVI.Gradient
   ( gradientScore
   , gradientReparam
+  , GradientParams(..)
   )
 where
 
 import qualified Data.Vector                   as V
-import           Statistics.BBVI.Propagator     ( PropNode(..) )
+import           Statistics.BBVI.Propagator     ( PropNode(..)
+                                                , Gradient
+                                                , Memory
+                                                )
 import           Statistics.BBVI.Class
 
 type Samples = V.Vector
 
-gradientScore
-  :: Dist a c
-  => PropNode a
-  -> (Double, V.Vector Double, Samples c)
-  -> PropNode a
-gradientScore = gradient f
- where
-  f Node {..} nFactors s l = fmap
-    (* (l + nFactors / weight * (logProb prior s - logProb dist s)))
-    (paramGradOfLogQ dist s)
+data GradientParams a = GParams { weight :: !Double
+                        , prior :: !a
+                        , rhoF :: !(Gradient -> PropNode a -> (Memory, V.Vector Double))}
 
-gradient f q@(Node {..}) (nFactors, like, samples) = U
-  memory'
-  (V.zipWith (*) rho' gr)
+-- weight (Node _ _ _ _ w _ _ _) = w
+-- prior (Node _ _ _ _ _ _ p _) = p
+-- rhoF (Node _ _ _ _ _ _ _ r) = r
+
+
+gradient
+  :: (DistUtil a)
+  => (PropNode a -> Double -> c -> Double -> V.Vector Double)
+  -> GradientParams a
+  -> PropNode a
+  -> (Double, V.Vector Double, Samples c)
+  -> PropNode a3
+gradient f (GParams {..}) no@(Node _time _memory dist) (nFactors, like, samples)
+  = U memory' (V.zipWith (*) rho' gr)
  where
   summed =
     V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0)
-      $ V.zipWith (f q nFactors) samples like
+      $ V.zipWith (f no nFactors) samples like
   gr              = fmap (/ (fromIntegral $ V.length samples)) summed
-  (memory', rho') = rhoF gr q
+  (memory', rho') = rhoF gr no
+
+gradientScore
+  :: Dist a c
+  => GradientParams a
+  -> PropNode a
+  -> (Double, V.Vector Double, Samples c)
+  -> PropNode a
+gradientScore gp@(GParams {..}) = gradient f gp
+ where
+  f (Node _time _memory dist) nFactors s l = fmap
+    (* (l + nFactors / weight * (logProb prior s - logProb dist s)))
+    (paramGradOfLogQ dist s)
 
 gradientReparam
   :: (Differentiable a Double)
-  => PropNode a
-  -> (Double, V.Vector Double, Samples Double)
+  => GradientParams a
   -> PropNode a
-gradientReparam = gradient f
+  -> (Double, V.Vector Double, Samples Double)
+  -- ^ nFactor, likelihoods, samples (corresponding ot each likelihood)
+  -> PropNode a
+gradientReparam gp@(GParams {..}) = gradient f gp
  where
-  f Node {..} nFactors s l = fmap
+  f (Node _time _memory dist) nFactors s l = fmap
     (* ( l
        + nFactors
        / weight

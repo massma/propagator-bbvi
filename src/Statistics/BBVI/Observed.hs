@@ -18,17 +18,7 @@ import           System.Random.MWC              ( uniformR )
 newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
 
 defaultObs :: V.Vector a -> PropNode (Obs a)
-defaultObs xs =
-  (Node 1
-        100000 -- global max step
-        1e-5 -- delta
-        (V.empty)
-        0
-        (O xs)
-        (O V.empty)
-        (\_x1 _x2 -> (V.empty, V.empty))
-  )
-
+defaultObs d = (Node 1 V.empty (O d))
 
 instance DistUtil (Obs Double) where
   nParams _x = 0

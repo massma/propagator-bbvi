@@ -3,11 +3,12 @@ module Statistics.BBVI
   , Dist(..)
   , Differentiable(..)
   , PropNode(..)
+  , PropNodes
+  , PropNodess
   , NormalDist(..)
   , normalDistr
-  , defaultNormalDist
+  , defaultPropNode
   , diffableNormalLogProb
-  , defaultDirichlet
   , dirichlet
   , alphas
   , defaultObs
@@ -16,6 +17,18 @@ module Statistics.BBVI
   , gradientReparam
   , SampleDouble
   , SampleVector
+  , stepTogether
+  , unsafeContent
+  , GradientParams(..)
+  , mergeGeneric
+  , mergeGenerics
+  , mergeGenericss
+  , rhoKuc
+  , defaultKucP
+  , KucP(..)
+  , dist
+  , time
+  -- , initLocal
   )
 where
 
@@ -26,3 +39,4 @@ import           Statistics.BBVI.Gradient
 import           Statistics.BBVI.Observed
 import           Statistics.BBVI.Distribution.Normal
 import           Statistics.BBVI.Distribution.Dirichlet
+import           Statistics.BBVI.Scheduler
