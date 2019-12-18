@@ -35,7 +35,7 @@ defaultNormalDist =
   )
   where dflt = (normalDistr 0 1)
 
-normalDistr mu std = ND mu (max 1e-100 std)
+normalDistr mu std = ND mu (max 1e-10 std)
 
 instance DistUtil NormalDist where
   fromParamVector xs = normalDistr (xs V.! 0) (xs V.! 1)

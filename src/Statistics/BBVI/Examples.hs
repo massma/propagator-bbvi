@@ -56,7 +56,7 @@ nState = 3 -- 10
 -----------------
 --  mixture
 ------------------
-mixtureLike
+mixtureLikeReparam
   :: (Dist a SampleVector, Dist b SampleVector, Differentiable c Double)
   => Int
   -> Int
@@ -66,7 +66,7 @@ mixtureLike
   -> PropNode b
   -> V.Vector (V.Vector (PropNode c))
   -> ST s (PropNode b, V.Vector (V.Vector (PropNode c)))
-mixtureLike nSamp nObs std gen xsN thetaN betasN = do
+mixtureLikeReparam nSamp nObs std gen xsN thetaN betasN = do
   obss        <- V.replicateM nObs (resample xss gen)
   thetaSamp   <- V.replicateM nSamp (resample theta gen)
   betaSamples <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
@@ -174,7 +174,7 @@ mixtureFit xs = runST $ do
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
   let priorTheta = dirichlet (V.replicate nState 1.0)
   let priorBeta = normalDistr 0 (5 * (fromIntegral nState - 1) :: Double)
-  let nSamp      = 10
+  let nSamp      = 100
   let nObs       = 100
   let localStep  = 20
   qBetas <- known =<< V.replicateM
@@ -205,61 +205,59 @@ mixtureFit xs = runST $ do
       )
     )
   xProp <- known $ defaultObs xs
-  -- (\tP bPs xP ->
-  --    watch tP $ \theta' ->
-  --      with xP $ \xs' ->
-  --        with bPs $ \betas' -> do
-  --          (upTh, upB) <-
-  --            mixtureLike nSamp nObs 1.0 gen1 xs' theta' betas'
-  --          write bPs upB
-  --          write tP upTh)
+  (\tP bPs xP -> watch tP $ \theta' -> with xP $ \xs' -> with bPs $ \betas' ->
+      do
+        (upTh, upB) <- mixtureLikeScore nSamp nObs 1.0 gen1 xs' theta' betas'
+        write bPs upB
+        write tP  upTh
+    )
+    qThetas
+    qBetas
+    xProp
+  -- (\tP bPs0 xP -> watch tP $ \theta' ->
+  --     with xP
+  --       $ (\xs' -> do
+  --           bPs <-
+  --             known
+  --               =<< (V.map (V.map (initLocal localStep)) <$> unsafeContent bPs0)
+  --           watch bPs $ \betas' -> do
+  --             (_upTh, upB) <- mixtureLikeReparam nSamp
+  --                                                nObs
+  --                                                1.0
+  --                                                gen1
+  --                                                xs'
+  --                                                theta'
+  --                                                betas'
+  --             write bPs upB
+  --           bPsNew <- unsafeContent bPs
+  --           write bPs0 bPsNew
+  --         )
+  --   )
   --   qThetas
   --   qBetas
   --   xProp
-  (\tP bPs0 xP -> watch tP $ \theta' ->
-      with xP
-        $ (\xs' -> do
-            bPs <-
-              known
-                =<< (V.map (V.map (initLocal localStep)) <$> unsafeContent bPs0)
-            watch bPs $ \betas' -> do
-              (_upTh, upB) <- mixtureLikeScore nSamp
-                                               nObs
-                                               1.0
-                                               gen1
-                                               xs'
-                                               theta'
-                                               betas'
-              write bPs upB
-            bPsNew <- unsafeContent bPs
-            write bPs0 bPsNew
-          )
-    )
-    qThetas
-    qBetas
-    xProp
-  (\tP0 bPs xP -> watch bPs $ \betas' ->
-      with xP
-        $ (\xs' -> do
-            tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
-            watch tP
-              $ (\theta' -> do
-                  (upTh, _upB) <- mixtureLikeScore nSamp
-                                                   nObs
-                                                   1.0
-                                                   gen1
-                                                   xs'
-                                                   theta'
-                                                   betas'
-                  write tP upTh
-                )
-            tPNew <- unsafeContent tP
-            write tP0 tPNew
-          )
-    )
-    qThetas
-    qBetas
-    xProp
+  -- (\tP0 bPs xP -> watch bPs $ \betas' ->
+  --     with xP
+  --       $ (\xs' -> do
+  --           tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
+  --           watch tP
+  --             $ (\theta' -> do
+  --                 (upTh, _upB) <- mixtureLikeScore nSamp
+  --                                                  nObs
+  --                                                  1.0
+  --                                                  gen1
+  --                                                  xs'
+  --                                                  theta'
+  --                                                  betas'
+  --                 write tP upTh
+  --               )
+  --           tPNew <- unsafeContent tP
+  --           write tP0 tPNew
+  --         )
+  --   )
+  --   qThetas
+  --   qBetas
+  --   xProp
   thetaF <- unsafeContent qThetas
   betaF  <- unsafeContent qBetas
   let betaDists = V.map (V.map dist) betaF

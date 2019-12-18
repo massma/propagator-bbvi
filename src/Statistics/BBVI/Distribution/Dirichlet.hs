@@ -36,7 +36,7 @@ defaultDirichlet prior =
         (rhoKuc defaultKucP)
   )
 
-dirichlet xs = Diri $ V.map (max 1e-100) xs
+dirichlet xs = Diri $ V.map (max 1e-10) xs
 
 alphas :: Dirichlet -> V.Vector Double
 alphas (Diri xs) = xs
