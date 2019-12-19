@@ -382,7 +382,7 @@ user	0m5.265s
 sys	0m1.351s
 
 Compilation finished at Wed Dec 18 23:35:39
-* pulling out likelihood, score gradient together
+* score pulling out likelihood, gradient together
 [1.0623141365176472,1.0935562040643676,1.3250718246408775]
 1000
 1000.0
@@ -420,7 +420,7 @@ user	0m3.402s
 sys	0m0.612s
 
 Compilation finished at Thu Dec 19 00:54:09
-* pulling out likelihood, reparam gradient together
+* reparam pulling out likelihood, gradient together
 [1.3156336532712793,1.3869122765600121,1.6082002104777533]
 1000
 1000.0
@@ -458,3 +458,42 @@ user	2m16.393s
 sys	0m33.022s
 
 Compilation finished at Thu Dec 19 00:57:44
+* reparam generalzing update together
+
+[1.3156336532712793,1.3869122765600121,1.6082002104777533]
+1000
+1000.0
+[-4.9661110308413665,4.99241630925761,2.1001235828225877e-2]
+[6.2365767870426594e-2,5.9524214130677065e-2,6.475516783170915e-2]
+ 183,480,985,968 bytes allocated in the heap
+  24,757,342,320 bytes copied during GC
+       7,637,728 bytes maximum residency (3081 sample(s))
+         810,784 bytes maximum slop
+               7 MB total memory in use (0 MB lost due to fragmentation)
+
+                                     Tot time (elapsed)  Avg pause  Max pause
+  Gen  0     172087 colls, 172087 par   84.833s  21.613s     0.0001s    0.0091s
+  Gen  1      3081 colls,  3080 par   16.611s   5.605s     0.0018s    0.0056s
+
+  Parallel GC work balance: 42.03% (serial 0%, perfect 100%)
+
+  TASKS: 10 (1 bound, 9 peak workers (9 total), using -N4)
+
+  SPARKS: 0(0 converted, 0 overflowed, 0 dud, 0 GC'd, 0 fizzled)
+
+  INIT    time    0.001s  (  0.001s elapsed)
+  MUT     time   56.179s  ( 63.301s elapsed)
+  GC      time  101.444s  ( 27.218s elapsed)
+  EXIT    time    0.001s  (  0.001s elapsed)
+  Total   time  157.625s  ( 90.521s elapsed)
+
+  Alloc rate    3,265,986,796 bytes per MUT second
+
+  Productivity  35.6% of total user, 69.9% of total elapsed
+
+
+real	1m30.684s
+user	2m37.773s
+sys	0m38.164s
+
+Compilation finished at Thu Dec 19 13:46:24
