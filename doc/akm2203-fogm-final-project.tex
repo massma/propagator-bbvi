@@ -1,0 +1,152 @@
+\documentclass[12pt]{article}
+
+\input{preamble}
+
+\begin{document}
+
+\begin{flushleft}
+\textbf{Propagator BBVI: a flexible framework for rapid design of BBVI
+  optimization algorithms} \\
+Adam Massmann (akm2203) \\
+\today
+\end{flushleft}
+
+Here I present propagator BBVI: a BBVI inference approach built on top
+of a propagator computing framework. Propagators consist of stateful
+cells that accumulate information about a value, and autonomous
+machines that add information about a value. In the case of BBVI,
+cells are each variational factor, and the autonomous machines are the
+computations that calculate gradients from the joint and update the
+variational families. This framework allows us to rapidly develop and
+test many (possibly novel) stochastic gradient update schemes: each
+variational factor can use different step size functions and
+convergence specifications, and we can mix both re-parameterization
+and score-based gradient estimates on portions of the model that are
+differentiable or not. Additionally, the propagator based framework
+has the potential to scale to massively parallel computation,
+implicitly with no necessary specification from the user. I use
+propagator BBVI to test the convergence properties of different
+algorithm designs: specifically I examine the usefulness of
+iteratively optimizing some portions of the posterior with others held
+fixed (e.g. a sort of black box CAVI). Propagator BBVI allows the user
+to easily and rapidly specify many such algorithm designs.
+
+
+\section{Introduction}
+
+% goals of library
+Box's loop allows us to interatively refine assumptions about our
+data. However, efficient movement around the loop requires that
+computationally tractable inference algorithms are easy to derive from
+a model encoding our assumptions. Black box variational inference
+(BBVI) performs inference on a very broad set of probablistic models
+without difficult model-specific derivations, and is a path towards
+quick iterations over Box's loop \citep[e.g.,][]{ranganath-2014,
+  kuc-2017}. Here I build a new approach to BBVI upon a propagator
+computing framework. The propagator-bbvi Haskell library aims for:
+
+\begin{itemize}
+\item A balance between the ease of specification and the flexibility
+  of the inference optmizition: the probablistic model should be easy
+  to specify on the computer and BBVI inference should follow
+  automatically from the specification. Howev er, the library is also
+  designed around easy user modification and performance tuning of the
+  optmization algorithms underlying the inference methods. So, there
+  is a tradeoff between automatic inference from the model
+  specification and the flexibility to tune the inference algorithm
+  for tractability. Here we favor a balance between adding complexity
+  in what the user must specify in order to run inference, and
+  granting the user the ability to try many different optimization
+  strategies underlying inference. Sensible defaults can mitigate
+  someof the added complexity of user specification.
+\item Extensibility: the library should be easy for users to
+  extend. For example, adding new variational distributions or
+  optimization algorithms should be simple and additive to the
+  codebase: no need to rewrite or modify existing code. To achieve
+  this goal, we favor a shallow library structure rather than a more
+  deeply embedded domain specific language (DSL). The benefits of a
+  shallow library are that it gives users more flexibility for
+  extension and specification through a designed blending between the
+  library and exisitng language abstractions (in this case Haskell)
+  . However, the downsides are that a shallow embedding requires that
+  users may need a deeper understanding for how the library works
+  internally, as well as familiarity with Haskell. A library approach
+  could be a nice alternative to popular general inference tools like
+  Stan and Infer.NET that favor more of a DSL approach (but note I am
+  not as familiar with tools like Edward and Pyro; they may take a
+  different approach).
+\item Ability to scale to massive data and models: inference methods
+  should scale to massive data. In addition to previous work on
+  stochastic gradient methods to scale to massive data
+  \citep[e.g.,][]{hoffman-2013, ranganath-2014, kuc-2017}, we hope to
+  build a framework that easys parallelization of inference
+  algorithms. In keeping with the extensibility goal, development of
+  new parallel scheduling and data subsampling techniques possible
+  without significant modification of the larger codebase, most
+  importantly the machinery for specifiying models.
+\end{itemize}
+
+As I describe the library design and its novelty for developing new
+approaches to BBVI, I will refer back to these three goals:
+optmiziation flexibility, extensibility, and scalability.
+
+\section{Introduction to propagators}
+
+The propagator computing framework \citep{radul-2009} consists of
+stateful cells that accumulate information about a value and stateless
+autonomous propagators that do computations and add information to
+cells. In other words, cells do no computation and propagators store
+no data. The user attaches propagators to cells. Their are two
+attachment types for propagators: \textit{watch} and \textit{write}
+attachments. When cells acquire new information, they trigger any
+propagators watching them to execute their computations with the new
+data, and those propagators will write the result of their
+computations to any cells they have a \textit{write} attachment to. If any
+of these writes are new information for a given cell, then they will
+trigger their own watching propagators to fire. In this manner,
+propagators and cells form an asycnrounous computation network that
+runs until no cells in the network can aquire any more information
+(``quiescence'').
+
+The propagator model is useful in many computational applications,
+including functional reactive programming, dependency directed search,
+and constraint satisfaction. For a full discussion I recommend
+\citet{radul-2009}. However, why propagators for BBVI? In short, they
+are a path towards massively parallel computation. Because all
+computation is asyncronous and there is no global state, the ordering
+and scheduling of computation is completely independent of the
+propagator network. So, once a problem is coded in terms of
+propagators, one can alter the scheduling of the propagator
+computations to suit their goals without touching the propagator
+network. In this way propgators directly lend themselves to my design
+goals: (1) \textit{scalability} through parralel comutation,
+and (2) \textit{extensibility}: computation scheduling is independent
+of the algorithm code, so new parallel schedulers can be developed
+without modification of any other pieces of the library.
+
+\section{BBVI with Propagators}
+
+Variational factors are represented as cells: they accumulate
+information moving them closer (on average) to the true
+posterior. Computations calculating gradients and updating the
+variational factors are the propagators. A deeper dive into the design
+will illuminate the consequences and benefits of this new approach to
+BBVI. The library is publically available at:
+\url{https://github.com/massma/propagator-bbvi}, and some sparse (but
+growing) documentation is available at:
+\url{http://www.columbia.edu/~akm2203/propagator-bbvi-0.1.0.0/}.
+
+\subsection{Cells: variational factors}
+
+
+\section{Discussion}
+
+\section{Future Work}
+
+\bibliography{references}
+
+\end{document}
+%%% Local Variables:
+%%% mode: latex
+%%% TeX-master: t
+%%% End:
