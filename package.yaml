@@ -27,7 +27,6 @@ dependencies:
 - vector
 - ad
 - math-functions
-- deepseq
 
 library:
   source-dirs: src

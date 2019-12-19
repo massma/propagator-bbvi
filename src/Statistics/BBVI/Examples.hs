@@ -116,6 +116,57 @@ mixtureLikeReparam nSamp std gen obss thetaG betaG thetaN betasN = do
   theta   = dist thetaN
   betass  = V.map (V.map dist) betasN
 
+mixtureLikeBeta
+  :: (Dist b SampleVector, Differentiable c Double) -- Dist a SampleVector,
+  => Int
+  -> Double
+  -> GenST s
+  -> V.Vector (V.Vector Double)
+  -> GradientParams b
+  -> GradientParams c
+  -> PropNode b
+  -> V.Vector (V.Vector (PropNode c))
+  -> ST s (V.Vector (V.Vector (PropNode c)))
+mixtureLikeBeta nSamp std gen obss thetaG betaG thetaN betasN = do
+  -- obss        <- V.replicateM nObs (resample xss gen)
+  thetaSamp   <- V.replicateM nSamp (resample theta gen)
+  betaSamples <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
+  let
+    gradLikes = V.zipWith
+      (\eps th -> V.foldl1' (V.zipWith (V.zipWith (+))) $ V.map
+        (\obs -> V.zipWith
+          (\ob betas -> grad
+            (\bs -> logSum
+              (V.map (auto . log) th)
+              (V.map (\mu -> diffableNormalLogProb mu (auto std) (auto ob)) bs)
+            )
+            (V.map (\d -> transform d eps) betas)
+          )
+          obs
+          betass
+        )
+        (obss :: V.Vector (V.Vector Double))
+      )
+      betaSamples
+      thetaSamp
+  return
+    $ (V.imap
+        (\dim v -> V.imap
+          (\c d -> gradientReparam
+            betaG
+            d
+            (nFactor, V.map ((V.! c) . (V.! dim)) gradLikes, betaSamples)
+          )
+          v
+        )
+        betasN
+      )
+ where
+  -- xss    = dist xsN
+  nFactor = fromIntegral $ V.length obss
+  theta   = dist thetaN
+  betass  = V.map (V.map dist) betasN
+
 mixtureLikeScore nSamp std gen obss thetaG betaG thetaN betasN = do
   -- obss        <- V.replicateM nObs (resample xs gen)
   thetaSamp   <- V.replicateM nSamp (resample theta gen)
@@ -157,6 +208,32 @@ mixtureLikeScore nSamp std gen obss thetaG betaG thetaN betasN = do
   theta   = dist thetaN
   betass  = V.map (V.map dist) betasN
 
+mixtureLikeTheta nSamp std gen obss thetaG betaG thetaN betasN = do
+  -- obss        <- V.replicateM nObs (resample xs gen)
+  thetaSamp   <- V.replicateM nSamp (resample theta gen)
+  betaSamples <- V.replicateM nSamp
+                              (V.mapM (V.mapM (\b -> resample b gen)) betass)
+  let likes = V.zipWith
+        (\bss th -> V.sum $ V.map
+          (\obs -> V.sum $ V.zipWith
+            (\ob bs -> logSum
+              (V.map log th)
+              (V.map (\mu -> logProb (normalDistr mu std) ob) bs)
+            )
+            obs
+            bss
+          )
+          (obss :: V.Vector (V.Vector Double))
+        )
+        betaSamples
+        thetaSamp
+  return $ (gradientScore thetaG thetaN (nFactor, likes, thetaSamp))
+ where
+  -- xs     = dist xsN
+  nFactor = fromIntegral $ V.length obss
+  theta   = dist thetaN
+  betass  = V.map (V.map dist) betasN
+
 genMixture :: ST s (V.Vector (V.Vector Double))
 genMixture = do
   gen <- create
@@ -184,21 +261,11 @@ mixtureFit xs = runST $ do
   let localStep  = 20
   let thetaGrad =
         GParams (fromIntegral $ V.length xs) priorTheta (rhoKuc defaultKucP) --
-  -- qTheta <- known $ defaultPropNode (dirichlet (V.replicate nState 1.0))
-  qTheta <- cellWith $ mergeGeneric globalDelta globalMaxStep
+  qTheta <- cellWith $ mergeGeneric globalMaxStep globalDelta
   write qTheta $ defaultPropNode (dirichlet (V.replicate nState 1.0))
   let betaGrad =
         GParams (fromIntegral $ V.length xs) priorBeta (rhoKuc defaultKucP) --
-  -- qBetas <- known =<< V.replicateM
-  --   nDimension
-  --   (V.generateM
-  --     nState
-  --     (\_i -> do
-  --       mu <- resample priorBeta gen1
-  --       return $ defaultPropNode (normalDistr mu (1.0 :: Double))
-  --     )
-  --   )
-  qBetas <- cellWith $ mergeGenericss globalDelta globalMaxStep
+  qBetas <- cellWith $ mergeGenericss globalMaxStep globalDelta
   write qBetas =<< V.replicateM
     nDimension
     (V.generateM
@@ -208,46 +275,15 @@ mixtureFit xs = runST $ do
         return $ defaultPropNode (normalDistr mu (1.0 :: Double))
       )
     )
-  stepTogether (mixtureLikeScore nSamp 1.0 gen1 xs thetaGrad betaGrad)
+  -- stepTogether (mixtureLikeScore nSamp 1.0 gen1 xs thetaGrad betaGrad)
+  --              qTheta
+  --              qBetas
+  stepSeparate localStep
+               globalDelta
+               (mixtureLikeTheta nSamp 1.0 gen1 xs thetaGrad betaGrad)
+               (mixtureLikeBeta nSamp 1.0 gen1 xs thetaGrad betaGrad)
                qTheta
                qBetas
-  -- (\tP bPs -> watch tP $ \theta' -> with bPs $ \betas' -> do
-  --     (upT, upB) <- mixtureLikeScore nSamp
-  --                                    1.0
-  --                                    gen1
-  --                                    xs
-  --                                    thetaGrad
-  --                                    betaGrad
-  --                                    theta'
-  --                                    betas'
-  --     write bPs upB
-  --     write tP  upT
-  --   )
-  --   qTheta
-  --   qBetas
-  -- (\tP bPs0 -> watch tP $ \theta' -> do
-  --     bPs <-
-  --       known =<< (V.map (V.map (initLocal localStep)) <$> unsafeContent bPs0)
-  --     watch bPs $ \betas' -> do
-  --       (_upTh, upB) <- mixtureLikeReparam nSamp 1.0 gen1 xs theta' betas'
-  --       write bPs upB
-  --     bPsNew <- unsafeContent bPs
-  --     write bPs0 bPsNew
-  --   )
-  --   qTheta
-  --   qBetas
-  -- (\tP0 bPs -> watch bPs $ \betas' -> do
-  --     tP <- known =<< (initLocal localStep <$> unsafeContent tP0)
-  --     watch tP
-  --       $ (\theta' -> do
-  --           (upTh, _upB) <- mixtureLikeScore nSamp 1.0 gen1 xs theta' betas'
-  --           write tP upTh
-  --         )
-  --     tPNew <- unsafeContent tP
-  --     write tP0 tPNew
-  --   )
-  --   qTheta
-  --   qBetas
   thetaF <- unsafeContent qTheta
   betaF  <- unsafeContent qBetas
   let betaDists = V.map (V.map dist) betaF

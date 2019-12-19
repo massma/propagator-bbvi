@@ -18,6 +18,7 @@ module Statistics.BBVI
   , SampleDouble
   , SampleVector
   , stepTogether
+  , stepSeparate
   , unsafeContent
   , GradientParams(..)
   , mergeGeneric

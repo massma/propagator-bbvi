@@ -59,12 +59,12 @@ type PropNodess a = V.Vector (V.Vector (PropNode a))
 
 mergeGeneric
   :: DistUtil a
-  => Double
-  -> Int
+  => Int
+  -> Double
   -> PropNode a
   -> PropNode a
   -> Change (PropNode a)
-mergeGeneric delta maxStep !x1 !x2 = m x1 x2
+mergeGeneric maxStep delta !x1 !x2 = m x1 x2
  where
   m no@(Node t memory d) (U memUp gradUp)
     | norm gradUp < delta = Change False no
@@ -78,7 +78,7 @@ mergeGeneric delta maxStep !x1 !x2 = m x1 x2
   m (U _ _) _ = Contradiction mempty "Trying to update a gradient"
   -- CAREFUL: below is dangerous if I start doing the ideas i thought
   -- about: changing maxstep and elta node for local optmizations
-  m no1@(Node t1 _m1 d1) no2@(Node t2 _m2 d2)
+  m no1@(Node t1 _m1 d1) no2@(Node t2 m2 d2)
     | t1 >= maxStep
     = Change False no1
     | (t2 > t1)
@@ -87,11 +87,11 @@ mergeGeneric delta maxStep !x1 !x2 = m x1 x2
     | otherwise
     = Change False no1
 
-mergeGenerics d m x1 x2 = V.sequence . V.zipWith (mergeGeneric d m) x1 $ x2
-mergeGenericss d m v1 v2 = V.sequence . V.zipWith (mergeGenerics d m) v1 $ v2
+mergeGenerics m d x1 x2 = V.sequence . V.zipWith (mergeGeneric m d) x1 $ x2
+mergeGenericss m d v1 v2 = V.sequence . V.zipWith (mergeGenerics m d) v1 $ v2
 
 instance DistUtil a => Propagated (PropNode a) where
-  merge = mergeGeneric 1e-16 1000000
+  merge = mergeGeneric 1000000 1e-16
 
 instance DistUtil a => Propagated (PropNodes a) where
   merge ns updates = V.sequence $ V.zipWith merge ns updates
