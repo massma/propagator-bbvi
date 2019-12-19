@@ -280,8 +280,8 @@ mixtureFit xs = runST $ do
   --              qBetas
   stepSeparate localStep
                globalDelta
-               (mixtureLikeTheta nSamp 1.0 gen1 xs thetaGrad betaGrad)
-               (mixtureLikeBeta nSamp 1.0 gen1 xs thetaGrad betaGrad)
+               (mixtureLikeReparam nSamp 1.0 gen1 xs thetaGrad betaGrad)
+               -- (mixtureLikeBeta nSamp 1.0 gen1 xs thetaGrad betaGrad)
                qTheta
                qBetas
   thetaF <- unsafeContent qTheta

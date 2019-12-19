@@ -34,7 +34,7 @@ stepTogether f x y = watch x $ \x' -> with y $ \y' -> do
 
 resetTime (Node _t m d) = Node 1 m d
 
-stepSeparate nLocal localDelta f1 f2 x0 ys0 = do
+stepSeparate nLocal localDelta f x0 ys0 = do
   watch x0 $ \x -> do
     yTemp <- unsafeContent ys0
     ys    <- cellWith $ mergeGenericss
@@ -42,8 +42,8 @@ stepSeparate nLocal localDelta f1 f2 x0 ys0 = do
       localDelta
     write ys yTemp
     watch ys $ \ys' -> do
-      -- (_upX, upYs) <- f2 x ys'
-      upYs <- f2 x ys'
+      (_upX, upYs) <- f x ys'
+      -- upYs <- f2 x ys'
       write ys upYs
     ysNew <- unsafeContent ys
     write ys0 ysNew
@@ -52,8 +52,8 @@ stepSeparate nLocal localDelta f1 f2 x0 ys0 = do
     x     <- cellWith $ mergeGeneric (nLocal + time xTemp) localDelta
     write x xTemp
     watch x $ \x' -> do
-      -- (upX, _upYs) <- f1 x' ys
-      upX <- f1 x' ys
+      (upX, _upYs) <- f x' ys
+      -- upX <- f1 x' ys
       write x upX
     xNew <- unsafeContent x
     write x0 xNew
