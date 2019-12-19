@@ -14,6 +14,7 @@ where
 import           Control.Monad.ST
 import           Data.Maybe                     ( fromMaybe )
 import           Data.Propagator
+import           Data.Foldable                  ( concat )
 import qualified Data.Vector                   as V
 import           Numeric.AD                     ( grad
                                                 , grad'
@@ -77,20 +78,13 @@ mixtureLikeReparam nSamp std gen obss thetaG betaG thetaN betasN = do
             (\(x1, y1) (x2, y2) -> (x1 + x2, V.zipWith (V.zipWith (+)) y1 y2))
           $ V.map
               (\obs ->
-                let
-                  (likes', gradss) = V.unzip $ V.zipWith
-                    (\ob betas -> grad'
-                      (\bs -> logSum
-                        (V.map (auto . log) th)
-                        (V.map
-                          (\mu -> diffableNormalLogProb mu (auto std) (auto ob))
-                          bs
-                        )
+                let (likes', gradss) = V.unzip $ V.zipWith
+                      (\ob betas -> grad'
+                        (mixtureLike (auto std) (V.map auto th) (auto ob))
+                        (V.map (\d -> transform d eps) betas)
                       )
-                      (V.map (\d -> transform d eps) betas)
-                    )
-                    obs
-                    betass
+                      obs
+                      betass
                 in  (V.sum likes', gradss)
               )
               (obss :: V.Vector (V.Vector Double))
@@ -111,7 +105,6 @@ mixtureLikeReparam nSamp std gen obss thetaG betaG thetaN betasN = do
         betasN
       )
  where
-  -- xss    = dist xsN
   nFactor = fromIntegral $ V.length obss
   theta   = dist thetaN
   betass  = V.map (V.map dist) betasN
@@ -167,25 +160,24 @@ mixtureLikeBeta nSamp std gen obss thetaG betaG thetaN betasN = do
   theta   = dist thetaN
   betass  = V.map (V.map dist) betasN
 
+mixtureLike :: (Floating a, Ord a) => a -> V.Vector a -> a -> V.Vector a -> a
+mixtureLike std theta ob betas = logSum
+  (V.map log theta)
+  (V.map (\mu -> diffableNormalLogProb mu std ob) betas)
+
 mixtureLikeScore nSamp std gen obss thetaG betaG thetaN betasN = do
   -- obss        <- V.replicateM nObs (resample xs gen)
   thetaSamp   <- V.replicateM nSamp (resample theta gen)
   betaSamples <- V.replicateM nSamp
                               (V.mapM (V.mapM (\b -> resample b gen)) betass)
   let likes = V.zipWith
-        (\bss th -> V.foldl1' (V.zipWith (+)) $ V.map
-          (\obs -> V.zipWith
-            (\ob bs -> logSum
-              (V.map log th)
-              (V.map (\mu -> logProb (normalDistr mu std) ob) bs)
-            )
-            obs
-            bss
-          )
-          (obss :: V.Vector (V.Vector Double))
+        (\theta' betass' ->
+          V.foldl1' (V.zipWith (+))
+            . V.map (\obs -> V.zipWith (mixtureLike std theta') obs betass')
+            $ obss
         )
-        betaSamples
         thetaSamp
+        betaSamples
   return
     $ ( gradientScore thetaG thetaN (nFactor, V.map V.sum likes, thetaSamp)
       , V.imap
@@ -275,15 +267,15 @@ mixtureFit xs = runST $ do
         return $ defaultPropNode (normalDistr mu (1.0 :: Double))
       )
     )
-  -- stepTogether (mixtureLikeScore nSamp 1.0 gen1 xs thetaGrad betaGrad)
-  --              qTheta
-  --              qBetas
-  stepSeparate localStep
-               globalDelta
-               (mixtureLikeReparam nSamp 1.0 gen1 xs thetaGrad betaGrad)
-               -- (mixtureLikeBeta nSamp 1.0 gen1 xs thetaGrad betaGrad)
+  stepTogether (mixtureLikeReparam nSamp 1.0 gen1 xs thetaGrad betaGrad)
                qTheta
                qBetas
+  -- stepSeparate localStep
+  --              globalDelta
+  --              (mixtureLikeReparam nSamp 1.0 gen1 xs thetaGrad betaGrad)
+  --              -- (mixtureLikeBeta nSamp 1.0 gen1 xs thetaGrad betaGrad)
+  --              qTheta
+  --              qBetas
   thetaF <- unsafeContent qTheta
   betaF  <- unsafeContent qBetas
   let betaDists = V.map (V.map dist) betaF

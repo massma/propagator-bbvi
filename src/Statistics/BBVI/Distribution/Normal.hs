@@ -46,6 +46,9 @@ instance Dist NormalDist SampleDouble where
 -- >>> paramGradOfLogQ (normalDistr 0.0 3.0) (2.0 :: Double)
 -- [0.2222222222222222,-0.18518518518518517]
 
+diffableNormalLogProb :: Floating a => a -> a -> a -> a
+{-# SPECIALIZE diffableNormalLogProb :: Double -> Double -> Double -> Double #-}
+{-# INLINE diffableNormalLogProb #-}
 diffableNormalLogProb mu sd x = -xm * xm / (2 * sd * sd) - ndPdfDenom
  where
   xm         = x - mu
@@ -60,3 +63,9 @@ instance Differentiable NormalDist SampleDouble where
 -- 2.0
 -- >>> gradTransform (normalDistr 0.0 1.0) (2.0 :: Double)
 -- [1.0,2.0]
+
+
+unfold n = V.unfoldr f
+ where
+  f v | V.null v  = Nothing
+      | otherwise = Just $ V.splitAt n v
