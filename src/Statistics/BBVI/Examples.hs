@@ -39,7 +39,7 @@ minimumProb = max 1e-308
 
 --- useful global params
 globalMaxStep :: Int
-globalMaxStep = 100
+globalMaxStep = 1000
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
@@ -183,11 +183,21 @@ mixtureFit xs = runST $ do
   let nSamp      = 10
   let localStep  = 20
   let thetaGrad =
-        GParams (fromIntegral $ V.length xs) priorTheta (rhoKuc defaultKucP)
+        GParams (fromIntegral $ V.length xs) priorTheta (rhoKuc defaultKucP) --
+  -- qTheta <- known $ defaultPropNode (dirichlet (V.replicate nState 1.0))
   qTheta <- cellWith $ mergeGeneric globalDelta globalMaxStep
   write qTheta $ defaultPropNode (dirichlet (V.replicate nState 1.0))
   let betaGrad =
-        GParams (fromIntegral $ V.length xs) priorBeta (rhoKuc defaultKucP)
+        GParams (fromIntegral $ V.length xs) priorBeta (rhoKuc defaultKucP) --
+  -- qBetas <- known =<< V.replicateM
+  --   nDimension
+  --   (V.generateM
+  --     nState
+  --     (\_i -> do
+  --       mu <- resample priorBeta gen1
+  --       return $ defaultPropNode (normalDistr mu (1.0 :: Double))
+  --     )
+  --   )
   qBetas <- cellWith $ mergeGenericss globalDelta globalMaxStep
   write qBetas =<< V.replicateM
     nDimension
@@ -198,13 +208,20 @@ mixtureFit xs = runST $ do
         return $ defaultPropNode (normalDistr mu (1.0 :: Double))
       )
     )
-  stepTogether (mixtureLikeReparam nSamp 1.0 gen1 xs thetaGrad betaGrad)
+  stepTogether (mixtureLikeScore nSamp 1.0 gen1 xs thetaGrad betaGrad)
                qTheta
                qBetas
-  -- (\tP bPs -> watch tP $ \(N t) -> with bPs $ \(bps) -> do
-  --     (upX, upY) <- mixtureLikeReparam nSamp 1.0 gen1 xs t (nodess bps)
-  --     write tP  upX
-  --     write bPs upY
+  -- (\tP bPs -> watch tP $ \theta' -> with bPs $ \betas' -> do
+  --     (upT, upB) <- mixtureLikeScore nSamp
+  --                                    1.0
+  --                                    gen1
+  --                                    xs
+  --                                    thetaGrad
+  --                                    betaGrad
+  --                                    theta'
+  --                                    betas'
+  --     write bPs upB
+  --     write tP  upT
   --   )
   --   qTheta
   --   qBetas
@@ -240,6 +257,8 @@ mixtureFit xs = runST $ do
     , Samp.mean . V.map (Samp.mean . V.map (fromIntegral . time)) $ betaF
     , fmap (\c -> Samp.mean . V.map (mean . (V.! c)) $ betaDists)
            [0 .. nState - 1]
+    -- , thetaF
     , fmap (\c -> Samp.mean . V.map (stdDev . (V.! c)) $ betaDists)
            [0 .. nState - 1]
+    -- , betaF
     )

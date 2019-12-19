@@ -11,6 +11,7 @@ import qualified Data.Vector                   as V
 import           Statistics.BBVI.Propagator     ( PropNode(..)
                                                 , Gradient
                                                 , Memory
+                                                , dist
                                                 )
 import           Statistics.BBVI.Class
 
@@ -20,11 +21,6 @@ data GradientParams a = GParams { weight :: !Double
                         , prior :: !a
                         , rhoF :: !(Gradient -> PropNode a -> (Memory, V.Vector Double))}
 
--- weight (Node _ _ _ _ w _ _ _) = w
--- prior (Node _ _ _ _ _ _ p _) = p
--- rhoF (Node _ _ _ _ _ _ _ r) = r
-
-
 gradient
   :: (DistUtil a)
   => (PropNode a -> Double -> c -> Double -> V.Vector Double)
@@ -32,11 +28,12 @@ gradient
   -> PropNode a
   -> (Double, V.Vector Double, Samples c)
   -> PropNode a3
-gradient f (GParams {..}) no@(Node _time _memory dist) (nFactors, like, samples)
-  = U memory' (V.zipWith (*) rho' gr)
+gradient f (GParams {..}) no (nFactors, like, samples) = U
+  memory'
+  (V.zipWith (*) rho' gr)
  where
   summed =
-    V.foldl' (V.zipWith (+)) (V.replicate (nParams dist) 0.0)
+    V.foldl' (V.zipWith (+)) (V.replicate (nParams (dist no)) 0.0)
       $ V.zipWith (f no nFactors) samples like
   gr              = fmap (/ (fromIntegral $ V.length samples)) summed
   (memory', rho') = rhoF gr no
@@ -49,9 +46,9 @@ gradientScore
   -> PropNode a
 gradientScore gp@(GParams {..}) = gradient f gp
  where
-  f (Node _time _memory dist) nFactors s l = fmap
-    (* (l + nFactors / weight * (logProb prior s - logProb dist s)))
-    (paramGradOfLogQ dist s)
+  f (Node _time _memory d) nFactors s l = fmap
+    (* (l + nFactors / weight * (logProb prior s - logProb d s)))
+    (paramGradOfLogQ d s)
 
 gradientReparam
   :: (Differentiable a Double)
@@ -62,13 +59,13 @@ gradientReparam
   -> PropNode a
 gradientReparam gp@(GParams {..}) = gradient f gp
  where
-  f (Node _time _memory dist) nFactors s l = fmap
+  f (Node _time _memory d) nFactors s l = fmap
     (* ( l
        + nFactors
        / weight
-       * ( sampleGradOfLogQ prior (transform dist s)
-         - sampleGradOfLogQ dist  (transform dist s)
+       * ( sampleGradOfLogQ prior (transform d s)
+         - sampleGradOfLogQ d     (transform d s)
          )
        )
     )
-    (gradTransform dist s)
+    (gradTransform d s)

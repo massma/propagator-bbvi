@@ -52,10 +52,10 @@ diffableNormalLogProb mu sd x = -xm * xm / (2 * sd * sd) - ndPdfDenom
   ndPdfDenom = log $ sqrt (2 * pi) * sd
 
 instance Differentiable NormalDist SampleDouble where
-  transform d eps = mean d + stdDev d * eps
+  transform d samp = mean d + stdDev d * samp
   epsilon _d gen = standard gen
   sampleGradOfLogQ d z = -(z - mean d) / (stdDev d ** 2)
-  gradTransform d eps = V.fromList [1.0, eps] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
+  gradTransform _d samp = V.fromList [1.0, samp] -- ND $ V.fromList [1.0 , eps * stdDev d] -- --
 -- >>> (transform (normalDistr 0.0 2.0) 1.0 :: Double)
 -- 2.0
 -- >>> gradTransform (normalDistr 0.0 1.0) (2.0 :: Double)
