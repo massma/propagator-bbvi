@@ -43,7 +43,7 @@ a model encoding our assumptions. Black box variational inference
 without difficult model-specific derivations, and is a path towards
 quick iterations over Box's loop \citep[e.g.,][]{ranganath-2014,
   kuc-2017}. Here I build a new approach to BBVI upon a propagator
-computing framework. The propagator-bbvi Haskell library aims for:
+computing framework. The \texttt{propagator-bbvi} Haskell library aims for:
 
 \begin{itemize}
 \item A balance between the ease of specification and the flexibility
@@ -88,7 +88,7 @@ computing framework. The propagator-bbvi Haskell library aims for:
 
 As I describe the library design and its novelty for developing new
 approaches to BBVI, I will refer back to these three goals:
-optmiziation flexibility, extensibility, and scalability.
+\textbf{\emph{optmiziation flexibility}}, \textbf{\emph{extensibility}}, and \textbf{\emph{scalability}}.
 
 \section{Introduction to propagators}
 
@@ -119,7 +119,7 @@ propagator network. So, once a problem is coded in terms of
 propagators, one can alter the scheduling of the propagator
 computations to suit their goals without touching the propagator
 network. In this way propgators directly lend themselves to my design
-goals: (1) \textit{scalability} through parralel comutation,
+goals: (1) \textit{scalability} through  parralel comutation,
 and (2) \textit{extensibility}: computation scheduling is independent
 of the algorithm code, so new parallel schedulers can be developed
 without modification of any other pieces of the library.
@@ -138,10 +138,217 @@ growing) documentation is available at:
 
 \subsection{Cells: variational factors}
 
+Variational factor cells contain three pieces of information: the
+variational factor and its parameterization (e.g. for a Gaussian, the
+mean and variance), a \textit{time} integer correspnding to the number
+of times the variational factor has been updated, and a
+\textit{memory} vector equal in length to the number of parameters of
+the variational factor (e.g. in the case of the Gaussian, a vector of
+length 2). The \textit{time} and \textit{memory} data are useful for
+the gradient updates: propagators calculating gradients can use these
+data to generate a step size for stochastic gradient optmization. For
+example, in \citet{kuc-2017} the step size parameterization uses both
+the number of gradient update interations, as a quantity determined by
+the history of gradient mangitudes. By including \textit{time} and
+\textit{memory} locations in our variational factor cells, our
+gradient update propagators can employ such step size
+parameterizations. Step size paramterizations that do not require
+memory information need not use these data, but they are still
+available. Inclusion of \textit{time} and \textit{memory} aid our goal
+of optimization flexibility.
+
+In addition to the information stored in variational factor cells,
+invariant data are also defined for each variational factor. These
+include the prior on the variational factor's latent variable, the
+step size function that takes the cell's \textit{time} and
+\textit{memory} data and calcualtes a step size and new
+\textit{memory} parameter, and a count of the total number of factors
+in the model's likelihood function that contain the latent variable
+corresponding to the variational factor. This count will be elaborated
+on in Section \ref{Propagators}, but it facilitates distributed
+updates by many propagators to a single variational factor. This and
+the step size function aid optmization flexibility: they user can
+easily specify many different optmization approaches to a factor
+independent of thsoe used in for all other variational factors.
+
+\subsubsection{Variational factor representation}
+
+A variational factor's parameters can be stored in any form. For
+example, in \texttt{propagator-bbvi}'s current version the Dirichlet
+distribution's paramters are stored as a vector, while the normal
+distribution's parameters are stored in a record datatype. However,
+all variational factors must implement the following functions to be a
+part of the necessary typeclasses for inference within
+\texttt{propagator-bbvi}\footnote{a quick rundown on Haskell syntax in
+  case you are not familiar: ``::'' means ``has type.'' so
+  ``fromParamVector :: ParamVector -> a'' means the function
+  ``fromParamVector'' has a type which takes in a parameter vector and
+  outputs a distribution of arbitrary type ``a.'' But don't worry too
+  much about it; I will explain all code snippits in normal language.}:
+
+\begin{verbatim}
+class DistUtil a where
+  fromParamVector :: ParamVector -> a
+  toParamVector :: a -> ParamVector
+  nParams :: a -> Int
+
+class DistUtil a => Dist a c where
+  resample :: a -> GenST s -> ST s c
+  logProb :: a -> c -> Double
+  paramGradOfLogQ ::  a -> c -> ParamVector
+\end{verbatim}
+
+The typeclass \texttt{DistUtil} provides functions that help with the
+necessary vector arithmetic for calculating gradients:
+\texttt{fromParamVector} converts a vector of paramters to a
+distribution, \texttt{toParamVector} converts a distribution to a
+vector of its parameters, and nParams takes a distribution and
+provides the number of parameters it containts. For a Gaussian
+example, \texttt{nParams} would return 2, and \texttt{fromParamVector}
+would read a vector containing the mean and variance and return a
+Gaussian, while \texttt{toParamVector} would take a Gaussian and
+return a vector containing the mean and variance. These functions are
+generally trivial to implement.
+
+The typeclass \texttt{Dist} provides the necessary functions to
+compute score-gradients \citep{ranganath-2014}. \texttt{resample}
+takes a distribution and a random number generator, and returns a
+sample from teh distribution. \texttt{lobProb} takes a distribution
+and an observation and return the log of the probability/desity of the
+observation. \texttt{paramGradOfLogQ} calculates the gradient of the
+log probability of an observation under a distribution, with repect to
+the parameters of the distribution. The gradient must be in vector
+form, and the locations of the gradients within the vector should
+match the location of the parameters in \texttt{fromParamVector} and
+\texttt{toParamVector}. This typeclass approach to representing
+variational factors aids the design goal of extensibility: to add a
+new variational factor for use in \texttt{propagator-bbvi}, one need
+only define six functions, three of which are trivial.
+
+However, one may also wish to use a reparameterization gradient
+updates \citep{kuc-2017} for a variational factor. Any distribution
+that implments the following four functions can be used with
+reparameterization propagators:
+
+\begin{verbatim}
+class (Dist a c) => Differentiable a c where
+  epsilon ::  a -> GenST s -> ST s c
+  transform :: a -> c -> c
+  gradTransform :: a -> c -> ParamVector
+  sampleGradOfLogQ ::  a -> c -> c
+\end{verbatim}
+
+\texttt{epsilon} generates an un-transformed sample: note that while
+the function takes a distribution as input, this is only to keep the
+type system happy. \texttt{transform} transforms a sample generated
+from $\epsilon$ into a sample from the variational
+distribution. \texttt{gradTransform} takes the gradient of the
+transformation with respect to the transformation paramters, while
+\texttt{sampleGradOfLogQ} takes the gradient of the log-probability
+function with respect to a transformed sample. For example, in the
+Gaussian example if \texttt{epsilon} samples from a standard normal,
+\texttt{transform} would be $\mu + \sigma \epsilon$,
+\texttt{gradTransform} would be $[1.0, \epsilon]$, and
+\texttt{sampleGradOfLogQ} would be $-(z - \mu) / \sigma ^ 2$. To
+reiterate, defining these functions for a variational factor is not
+necessary for using a factor in \texttt{propagator-bbvi}, but they do
+allow one to calculate gradients with the reparameterization
+gradient. As we will see next, one of the strengths of
+\texttt{propagators-bbvi} is that it allows us to easily mix and match
+reparameteriation updates with score updates on parts of the model
+that are or are not differentiable, and on factors for which we can or
+cannot implement the functions in the \texttt{Differentiable}
+typeclass. This approach lends itself to the goal of optmiziation
+flexibility: we can use reparameterizations gradients (with their
+lower variance) on factors where possible, and score gradients
+elsewhere.
+
+\subsection{Propagators: calculating gradients}
+
+Propagators calcualte gradients by watching variational factor cells,
+and then writing new gradients. The gradient calculations themselves
+follow the procedures outlined in \citet{ranganath-2014} and
+\citet{kuc-2017}, and are not novel. However how they are embedded in
+the propagator framework does allow for development of new algorithms,
+so I focus discussion on that. Each propagator calculates the gradient
+using observations, variational cells, and a set of factors from the
+log likelihood (e.g. the model specification). The number of factors
+from the log likelihood that the propagator calcualtes a gradient on
+is used in conjunction with the total number of factors stored in the
+invariant data of the variational factor to re-weight the prior and
+entropy terms when calculating the gradient update. For example, if
+the latent variable corresponding to a variational cell is in 10
+factors of a likelihood function, but a propagator only calculates the
+gradient based on one factor, then the prior and entropy terms are
+scaled down by $1/10$. Haskell's lazy evaluation also helps the user
+implement flexible, distributed propagation. The user can specify the
+necessary likelihood calculations on the full model, and use this same
+specification in very local propators (for example, a gradient
+propagator update for a single factor). When the propagator writes its
+gradient to the variational cell, lazy evaluation insures that only
+the pieces of the full likelihood relevant to the gradient propagation
+are actually calculated. So, one can use the full likelihood
+specification in local propagators without fear that uneeded likelhood
+computaitons whill be execture. This all allows us to break up the
+update computation into many different propagators, whcih can all push
+updates to variational cells asynchronously. These design decisions
+aid scalability.
+
+% discuss rao-blackwellization here?
+
+Beyond just the gradient calculation aspect of propagators, we can
+also specify how they react to changes in their input cells and
+leverege this to rapidly develop new update schedules. For example, it
+is easy to specify that a propagator watches one variational factor
+for a change, and then upon that change optmizes another variational
+factor for many steps (or until covergence) with the watched
+variational factor fixed. This flexibility in the manner in which
+graident updates are applied to cells is indepndent of the caluclation
+of the updates themselves, but allows users to rapidly test different
+optmiziation orderings than those presented in the literature, which
+could yield more rapid convergence depending on the model.
 
 \section{Discussion}
 
-\section{Future Work}
+\texttt{propagator-bbvi} allows easy specification of completely novel
+optmiziation strategies for black box variational inference. Users can
+mix and match reparameterization gradient updates with score gradient
+updates, they can update variational factors from very local
+(e.g. single factor) computations, they can specify different step
+size functions and parameters for different factors, and they easily use
+piecewize optimization where some variational factors are optimized to
+arbitrary convergence while all others are held fixed. Initial tests
+with the library suggest that optmizing variational factors with
+others held fixed can increase convergence rates. Given that this
+behavior is likely model-dependent and most of my thought has gone
+into the library design and development of BBVI algorithms using
+propagators, this report uses available its available space to discuss
+design.
+
+Additionally \texttt{propagator-bbvi} is easily extensible to new
+variational factors and models. Introduction of a new variational
+factor only requires the definiton of six functions for that factor,
+three of which are trivial. Finally, \texttt{propagtor-bbvi} has the
+ability to scale up to massively parallel computation. All graidne
+tupdates, which can be as local as updateing a vairational factor
+based on a single factor in the likelhoood, are evaluated
+asycnronously, allowing them to be arbirarily parrelelized by the
+scheduler. Currently, \texttt{propagator-bbvi} is build on the
+\texttt{propagators} library which has a very simple serial scheduler
+build on the ST monad. While still fast for serial computations,
+really scaling up \texttt{propagator-bbvi} requires a more
+sophisticated parralel scheduler, that also handles greedy propagator
+specifications that in the current scheduler causes an exponential
+space leak of thunks (discuss this?). The good news is that developing
+new underlying schedulers is completely independent of the
+\texttt{propagator-bbvi} code: now that BBVI has been framed in terms
+of propagators, any executions scheduler can be used without changing
+the propagator code.
+
+In summary \texttt{propagator-bbvi} is an extensible, scalable
+playground for developing flexible and nobel optmiziation strategies
+for BBBI. I will continue to hack on it, extending it as needed by my
+reaserch, and I hope others do as well.
 
 \bibliography{references}
 

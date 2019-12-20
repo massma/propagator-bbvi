@@ -1,3 +1,10 @@
 .stack-work/
 propagator-bbvi.cabal
 *~
+akm2203-fogm-final-project.aux
+akm2203-fogm-final-project.bbl
+akm2203-fogm-final-project.blg
+akm2203-fogm-final-project.log
+akm2203-fogm-final-project.pdf
+akm2203-fogm-final-project.synctex.gz
+stack.yaml.lock
