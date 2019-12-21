@@ -8,7 +8,7 @@ module Statistics.BBVI.Gradient
 where
 
 import qualified Data.Vector                   as V
-import           Statistics.BBVI.Propagator     ( PropNode(..)
+import           Statistics.BBVI.Propagator     ( DistCell(..)
                                                 , Gradient
                                                 , Memory
                                                 , dist
@@ -19,15 +19,15 @@ type Samples = V.Vector
 
 data GradientParams a = GParams { weight :: !Double
                         , prior :: !a
-                        , rhoF :: !(Gradient -> PropNode a -> (Memory, V.Vector Double))}
+                        , rhoF :: !(Gradient -> DistCell a -> (Memory, V.Vector Double))}
 
 gradient
   :: (DistUtil a)
-  => (PropNode a -> Double -> c -> Double -> V.Vector Double)
+  => (DistCell a -> Double -> c -> Double -> V.Vector Double)
   -> GradientParams a
-  -> PropNode a
+  -> DistCell a
   -> (Double, V.Vector Double, Samples c)
-  -> PropNode a3
+  -> DistCell a3
 gradient f (GParams {..}) no (nFactors, like, samples) = U
   memory'
   (V.zipWith (*) rho' gr)
@@ -41,9 +41,9 @@ gradient f (GParams {..}) no (nFactors, like, samples) = U
 gradientScore
   :: Dist a c
   => GradientParams a
-  -> PropNode a
+  -> DistCell a
   -> (Double, V.Vector Double, Samples c)
-  -> PropNode a
+  -> DistCell a
 gradientScore gp@(GParams {..}) = gradient f gp
  where
   f (Node _time _memory d) nFactors s l = fmap
@@ -53,10 +53,10 @@ gradientScore gp@(GParams {..}) = gradient f gp
 gradientReparam
   :: (Differentiable a Double)
   => GradientParams a
-  -> PropNode a
+  -> DistCell a
   -> (Double, V.Vector Double, Samples Double)
   -- ^ nFactor, likelihoods, samples (corresponding ot each likelihood)
-  -> PropNode a
+  -> DistCell a
 gradientReparam gp@(GParams {..}) = gradient f gp
  where
   f (Node _time _memory d) nFactors s l = fmap

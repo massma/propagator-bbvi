@@ -11,7 +11,7 @@ import           Data.Maybe                     ( fromMaybe )
 import qualified Data.Vector                   as V
 import           Statistics.BBVI.Propagator     ( Time
                                                 , time
-                                                , PropNode(..)
+                                                , DistCell(..)
                                                 , mergeGeneric
                                                 , mergeGenericss
                                                 )

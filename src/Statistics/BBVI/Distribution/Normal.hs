@@ -12,7 +12,7 @@ import           Numeric.MathFunctions.Constants
                                                 ( m_sqrt_2_pi )
 import           Statistics.BBVI.Class
 import           Statistics.BBVI.StepSize
-import           Statistics.BBVI.Propagator     ( PropNode(..)
+import           Statistics.BBVI.Propagator     ( DistCell(..)
                                                 , SampleDouble
                                                 )
 import           System.Random.MWC.Distributions

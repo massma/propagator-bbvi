@@ -41,7 +41,7 @@ minimumProb = max 1e-308
 
 --- useful global params
 globalMaxStep :: Int
-globalMaxStep = 1000
+globalMaxStep = 100
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
@@ -74,11 +74,11 @@ updateReparam
   -> V.Vector (V.Vector Double)
   -> GradientParams b
   -> GradientParams c
-  -> PropNode b
-  -> V.Vector (V.Vector (PropNode c))
+  -> DistCell b
+  -> V.Vector (V.Vector (DistCell c))
   -> ST
        s
-       (PropNode b, V.Vector (V.Vector (PropNode c)))
+       (DistCell b, V.Vector (V.Vector (DistCell c)))
 updateReparam nSamp jointF gen obss thetaG betaG thetaN betasN = do
   -- obss        <- V.replicateM nObs (resample xss gen)
   thetaSamp   <- V.replicateM nSamp (resample theta gen)
@@ -184,7 +184,7 @@ mixtureFit xs = runST $ do
   let thetaGrad =
         GParams (fromIntegral $ V.length xs) priorTheta (rhoKuc defaultKucP) --
   qTheta <- cellWith $ mergeGeneric globalMaxStep globalDelta
-  write qTheta $ defaultPropNode (dirichlet (V.replicate nState 1.0))
+  write qTheta $ defaultDistCell (dirichlet (V.replicate nState 1.0))
   let betaGrad =
         GParams (fromIntegral $ V.length xs) priorBeta (rhoKuc defaultKucP) --
   qBetas <- cellWith $ mergeGenericss globalMaxStep globalDelta
@@ -194,7 +194,7 @@ mixtureFit xs = runST $ do
       nState
       (\_i -> do
         mu <- resample priorBeta gen1
-        return $ defaultPropNode (normalDistr mu (1.0 :: Double))
+        return $ defaultDistCell (normalDistr mu (1.0 :: Double))
       )
     )
   stepTogether

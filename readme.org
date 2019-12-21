@@ -6,3 +6,16 @@ Graphical Models]]" could access the code (this was developed as my
 final project for the course).  I do not recommend it to users at this
 early stage.  However that said, contributions are welcome, as well as
 feedback (I am relatively new to Haskell).
+
+* documentation
+
+The final report for the course is available at
+[[file:doc/akm2203-fogm-final-project.tex][doc/akm2203-fogm-final-project.tex]].
+
+Very sparse documentation is available at
+http://www.columbia.edu/~akm2203/propagator-bbvi-0.1.0.0/
+Filling out the documentation is top of my to do list.
+
+The main entry point is ~Statistics.BBVI~. Importing that should give
+you what you need to get started. There are some examples in
+~Statistics.BBVI.Examples~.

@@ -1,35 +1,52 @@
 module Statistics.BBVI
-  ( DistUtil(..)
+  ( -- * typeclasses for defining new distributions
+    DistUtil(..)
   , Dist(..)
   , Differentiable(..)
-  , PropNode(..)
-  , PropNodes
-  , PropNodess
-  , NormalDist(..)
-  , normalDistr
-  , defaultPropNode
-  , diffableNormalLogProb
-  , dirichlet
-  , alphas
-  , defaultObs
-  , Obs(..)
-  , gradientScore
-  , gradientReparam
-  , SampleDouble
-  , SampleVector
-  , stepTogether
-  , stepSeparate
-  , unsafeContent
-  , GradientParams(..)
+
+    -- * types, acessors and merges for distribution cells
+  , DistCell(..)
+  , DistCells
+  , DistCellss
+  , dist
+  , time
+  , defaultDistCell
   , mergeGeneric
   , mergeGenerics
   , mergeGenericss
+
+  -- * step size functions
   , rhoKuc
   , defaultKucP
   , KucP(..)
-  , dist
-  , time
-  -- , initLocal
+
+
+  -- * normal distribution types and functions
+  , NormalDist(..)
+  , normalDistr
+  , diffableNormalLogProb
+
+  -- * dirichlet distribution types and functions
+  , dirichlet
+  , alphas
+  , defaultObs
+
+  -- * resample observations with a propagator
+  , Obs(..)
+
+  -- * helper functions for transforming the log joint into gradient propagators
+  , gradientScore
+  , gradientReparam
+  , GradientParams(..)
+
+  -- * sampling types
+  , SampleDouble
+  , SampleVector
+
+  -- * gradient propagator attachment functions
+  , stepTogether
+  , stepSeparate
+  , unsafeContent
   )
 where
 

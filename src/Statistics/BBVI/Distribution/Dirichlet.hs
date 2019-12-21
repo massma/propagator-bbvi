@@ -15,7 +15,7 @@ import           Numeric.SpecFunctions          ( logGamma
                                                 )
 import           Statistics.BBVI.Class
 import           Statistics.BBVI.StepSize
-import           Statistics.BBVI.Propagator     ( PropNode(..)
+import           Statistics.BBVI.Propagator     ( DistCell(..)
                                                 , SampleVector
                                                 )
 import qualified System.Random.MWC.Distributions

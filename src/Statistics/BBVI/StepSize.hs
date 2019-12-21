@@ -7,14 +7,14 @@ module Statistics.BBVI.StepSize
 where
 
 import qualified Data.Vector                   as V
-import           Statistics.BBVI.Propagator     ( PropNode(..)
+import           Statistics.BBVI.Propagator     ( DistCell(..)
                                                 , Gradient
                                                 , Memory
                                                 )
 
 type Rho = V.Vector Double
 
-rhoKuc :: KucP -> Gradient -> PropNode a -> (Memory, Rho)
+rhoKuc :: KucP -> Gradient -> DistCell a -> (Memory, Rho)
 rhoKuc KucP {..} gra (Node time memory _dist) =
   ( deltaM
   , V.zipWith

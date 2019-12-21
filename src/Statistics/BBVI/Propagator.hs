@@ -3,9 +3,9 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 module Statistics.BBVI.Propagator
-  ( PropNode(..)
-  , PropNodes
-  , PropNodess
+  ( DistCell(..)
+  , DistCells
+  , DistCellss
   , SampleVector
   , SampleDouble
   , Gradient
@@ -16,7 +16,7 @@ module Statistics.BBVI.Propagator
   , mergeGenericss
   , dist
   , time
-  , defaultPropNode
+  , defaultDistCell
   )
 where
 
@@ -35,35 +35,35 @@ type Memory = V.Vector Double
 
 type Time = Int
 
-data PropNode a
+data DistCell a
   = U !Memory !Gradient
   | Node !Time !Memory !a deriving (Show, Eq, Ord, Read)
 
--- !(Gradient -> PropNode a -> (Memory, Gradient))
+-- !(Gradient -> DistCell a -> (Memory, Gradient))
 
-defaultPropNode :: DistUtil a => a -> PropNode a
-defaultPropNode d = Node 1 (V.replicate (nParams d) 0) d
+defaultDistCell :: DistUtil a => a -> DistCell a
+defaultDistCell d = Node 1 (V.replicate (nParams d) 0) d
 
-time :: PropNode a -> Time
+time :: DistCell a -> Time
 time (Node t _ _) = t
 -- time (U{}       ) = error "called time on update propnode!"
 -- memory (Node _ m _) = m
 
-dist :: PropNode a -> a
+dist :: DistCell a -> a
 dist (Node _ _ d) = d
 -- dist (U{}       ) = error "called dist on update propnode!"
 
-type PropNodes a = V.Vector (PropNode a)
+type DistCells a = V.Vector (DistCell a)
 
-type PropNodess a = V.Vector (V.Vector (PropNode a))
+type DistCellss a = V.Vector (V.Vector (DistCell a))
 
 mergeGeneric
   :: DistUtil a
   => Int
   -> Double
-  -> PropNode a
-  -> PropNode a
-  -> Change (PropNode a)
+  -> DistCell a
+  -> DistCell a
+  -> Change (DistCell a)
 mergeGeneric maxStep delta !x1 !x2 = m x1 x2
  where
   m no@(Node t memory d) (U memUp gradUp)
@@ -90,13 +90,13 @@ mergeGeneric maxStep delta !x1 !x2 = m x1 x2
 mergeGenerics m d x1 x2 = V.sequence . V.zipWith (mergeGeneric m d) x1 $ x2
 mergeGenericss m d v1 v2 = V.sequence . V.zipWith (mergeGenerics m d) v1 $ v2
 
-instance DistUtil a => Propagated (PropNode a) where
+instance DistUtil a => Propagated (DistCell a) where
   merge = mergeGeneric 1000000 1e-16
 
-instance DistUtil a => Propagated (PropNodes a) where
+instance DistUtil a => Propagated (DistCells a) where
   merge ns updates = V.sequence $ V.zipWith merge ns updates
 
-instance DistUtil a => Propagated (PropNodess a) where
+instance DistUtil a => Propagated (DistCellss a) where
   merge ns updates = V.sequence $ V.zipWith merge ns updates
 
 norm :: V.Vector Double -> Double
