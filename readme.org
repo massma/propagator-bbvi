@@ -1,3 +1,8 @@
-* playing around with bbvi and propagatos
+* black box variational inference with propagators
 
-specifically trying to automate rao-blackwellization.
+This library is very experimental and still in development. I made it
+available mostly so instructors for the course "[[http://www.cs.columbia.edu/~blei/fogm/2019F/index.html][Foundations of
+Graphical Models]]" could access the code (this was developed as my
+final project for the course).  I do not recommend it to users at this
+early stage.  However that said, contributions are welcome, as well as
+feedback (I am relatively new to Haskell).
