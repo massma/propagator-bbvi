@@ -72,8 +72,8 @@ updateReparam
      )
   -> GenST s
   -> V.Vector (V.Vector Double)
-  -> GradientParams b
-  -> GradientParams c
+  -> DistInvariant b
+  -> DistInvariant c
   -> DistCell b
   -> V.Vector (V.Vector (DistCell c))
   -> ST
@@ -181,12 +181,14 @@ mixtureFit xs = runST $ do
   let priorBeta = normalDistr 0 (5 * (fromIntegral nState - 1) :: Double)
   let nSamp      = 10
   let localStep  = 20
-  let thetaGrad =
-        GParams (fromIntegral $ V.length xs) priorTheta (rhoKuc defaultKucP) --
+  let thetaGrad = DistInvariant (fromIntegral $ V.length xs)
+                                priorTheta
+                                (rhoKuc defaultKucP) --
   qTheta <- cellWith $ mergeGeneric globalMaxStep globalDelta
   write qTheta $ defaultDistCell (dirichlet (V.replicate nState 1.0))
-  let betaGrad =
-        GParams (fromIntegral $ V.length xs) priorBeta (rhoKuc defaultKucP) --
+  let betaGrad = DistInvariant (fromIntegral $ V.length xs)
+                               priorBeta
+                               (rhoKuc defaultKucP) --
   qBetas <- cellWith $ mergeGenericss globalMaxStep globalDelta
   write qBetas =<< V.replicateM
     nDimension

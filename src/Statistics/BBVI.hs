@@ -8,6 +8,7 @@ module Statistics.BBVI
   , DistCell(..)
   , DistCells
   , DistCellss
+  , DistInvariant(..)
   , dist
   , time
   , defaultDistCell
@@ -37,7 +38,6 @@ module Statistics.BBVI
   -- * helper functions for transforming the log joint into gradient propagators
   , gradientScore
   , gradientReparam
-  , GradientParams(..)
 
   -- * sampling types
   , SampleDouble
