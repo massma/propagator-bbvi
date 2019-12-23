@@ -1,3 +1,11 @@
+{-|
+Module      : Statistics.BBVI
+Description : main entry point for propagator-bbvi
+Copyright   : (c) Adam Massmann, 2019
+License     : BSD3
+Maintainer  : akm2203@columbia.edu
+Stability   : experimental
+-}
 module Statistics.BBVI
   ( -- * typeclasses for defining new distributions
     DistUtil(..)

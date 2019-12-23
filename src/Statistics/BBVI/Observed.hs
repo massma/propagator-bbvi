@@ -15,8 +15,13 @@ import           Statistics.BBVI.Propagator     ( DistCell(..)
                                                 )
 import           System.Random.MWC              ( uniformR )
 
+-- | dummy distribution representing a vector of observations, for use
+-- with building "observation" distribution cells.  these can be used
+-- to easily/selectively subsample (and resample) observations using
+-- existing typeclass methods for use with stochatic gradient updates.
 newtype Obs a = O (V.Vector a) deriving (Show, Eq, Ord, Read)
 
+-- | helper function to build a distribution cell of observations
 defaultObs :: V.Vector a -> DistCell (Obs a)
 defaultObs d = (Node 1 V.empty (O d))
 

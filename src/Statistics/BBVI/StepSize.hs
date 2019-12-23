@@ -12,9 +12,15 @@ import           Statistics.BBVI.Propagator     ( DistCell(..)
                                                 , Memory
                                                 )
 
+-- | step size, vector as same length as n parameters in distribution
 type Rho = V.Vector Double
 
-rhoKuc :: KucP -> Gradient -> DistCell a -> (Memory, Rho)
+-- | calculates a step size following Kucukelbir et al 2017
+rhoKuc
+  :: KucP -- ^ parameters
+  -> Gradient -- ^ gradient at time t
+  -> DistCell a -- ^ distribution cell (for memory)
+  -> (Memory, Rho) -- ^ change in memory, stepsize
 rhoKuc KucP {..} gra (Node time memory _dist) =
   ( deltaM
   , V.zipWith
@@ -29,7 +35,9 @@ rhoKuc KucP {..} gra (Node time memory _dist) =
   )
  where
   deltaM = V.zipWith (\g s -> alpha * g ^ (2 :: Int) - alpha * s) gra memory
+rhoKuc _kp _gra (U{}) = error "called step size cell on an update cell!"
 
+-- | parameters for 'rhoKuc'
 data KucP = KucP
   { alpha :: Double
   , eta :: Double
@@ -37,6 +45,7 @@ data KucP = KucP
   , eps :: Double
   } deriving (Show, Eq, Ord, Read)
 
--- | eta is what you probably want to tune: kucukelbir trys 0.01 0.1 1 10 100
+-- | default parameters for 'rhoKuc.' eta is what you probably want to
+-- tune: kucukelbir et al try 0.01 0.1 1 10 100
 defaultKucP :: KucP
 defaultKucP = KucP { alpha = 0.1, eta = 0.1, tau = 1.0, eps = 1e-16 }

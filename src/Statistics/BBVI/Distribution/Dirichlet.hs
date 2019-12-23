@@ -14,19 +14,21 @@ import           Numeric.SpecFunctions          ( logGamma
                                                 , digamma
                                                 )
 import           Statistics.BBVI.Class
-import           Statistics.BBVI.StepSize
-import           Statistics.BBVI.Propagator     ( DistCell(..)
-                                                , SampleVector
-                                                )
+import           Statistics.BBVI.Propagator     ( SampleVector )
 import qualified System.Random.MWC.Distributions
                                                as MWCD
 
-
+-- | data type for a dirichlet distribution
 newtype Dirichlet = Diri (V.Vector Double) deriving (Show, Eq, Ord, Read)
 
+-- | build a dirichlet
+dirichlet
+  :: V.Vector Double -- ^ vector of parameters
+  -> Dirichlet
 dirichlet xs = Diri $ V.map (max 1e-10) xs
 
-alphas :: Dirichlet -> V.Vector Double
+-- | get dirichlet parameters
+alphas :: Dirichlet -> V.Vector Double -- ^ dirichlet parameters
 alphas (Diri xs) = xs
 
 logB :: Dirichlet -> Double

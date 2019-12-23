@@ -8,14 +8,10 @@ early stage.  However that said, contributions are welcome, as well as
 feedback (I am relatively new to Haskell).
 
 * documentation
+Sparse but growing documentation is available at
+http://www.columbia.edu/~akm2203/propagator-bbvi-0.1.0.0/. The main
+entry point is [[http://www.columbia.edu/~akm2203/propagator-bbvi-0.1.0.0/Statistics-BBVI.html][Statistics.BBVI]]. The library should build with stack.
 
-The final report for the course is available at
-[[file:doc/akm2203-fogm-final-project.tex][doc/akm2203-fogm-final-project.tex]].
-
-Very sparse documentation is available at
-http://www.columbia.edu/~akm2203/propagator-bbvi-0.1.0.0/
-Filling out the documentation is top of my to do list.
-
-The main entry point is ~Statistics.BBVI~. Importing that should give
-you what you need to get started. There are some examples in
-~Statistics.BBVI.Examples~.
+The final report I wrote for [[http://www.cs.columbia.edu/~blei/fogm/2019F/index.html][Foundations of Graphical Models]] is
+available at [[file:doc/akm2203-fogm-final-project.tex][doc/akm2203-fogm-final-project.tex]], and it discusses the
+motivation and design of the library.

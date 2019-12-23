@@ -24,9 +24,11 @@ import           Statistics.BBVI.Class
 import qualified Data.Vector                   as V
 import           Data.Propagator
 
-
+-- | a sample with a vector type e.g. categorical sampled from a
+-- dirichlet
 type SampleVector = V.Vector Double
 
+-- | a sample with a real type e.g. number sampled from a gaussian
 type SampleDouble = Double
 
 type Gradient = V.Vector Double
@@ -39,7 +41,7 @@ type Time = Int
 data DistCell a
   =
     U !Memory !Gradient -- ^ update to a disribution node
-  | Node !Time !Memory !a -- ^ distribution node
+  | Node !Time !Memory !a -- ^ distribution node of type a
   deriving (Show, Eq, Ord, Read)
 
 -- !(Gradient -> DistCell a -> (Memory, Gradient))
@@ -100,6 +102,7 @@ mergeGeneric maxStep delta !x1 !x2 = m x1 x2
     | otherwise
     = Change False no1
 
+-- | generalization of 'mergeGeneric' to cells of vectors of distributions
 mergeGenerics
   :: DistUtil a
   => Int -- ^ max time steps a cell can gain more information
@@ -110,10 +113,9 @@ mergeGenerics
   -> DistCells a -- ^ current cell
   -> DistCells a -- ^ propsed update to cell
   -> Change (DistCells a)
--- | generalziation of 'mergeGeneric' to cells of vectors of distributions
 mergeGenerics m d x1 x2 = V.sequence . V.zipWith (mergeGeneric m d) x1 $ x2
--- | generalziation of 'mergeGeneric' to cells of arrays of distributions
 
+-- | generalization of 'mergeGeneric' to cells of arrays of distributions
 mergeGenericss
   :: DistUtil a
   => Int -- ^ max time steps a cell can gain more information
