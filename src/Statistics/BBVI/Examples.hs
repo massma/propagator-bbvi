@@ -5,8 +5,8 @@ module Statistics.BBVI.Examples
   , mixtureFit
   , genNormal
   , normalFit
-  -- , genDirichlet
-  -- , dirichletFit
+  , genDirichlet
+  , dirichletFit
   -- , genMixedMem
   -- , mixedMemFit
   )
@@ -29,7 +29,7 @@ import qualified System.Random.MWC.Distributions
 import           Statistics.BBVI
 
 --- helper functions
-
+logSum :: (Floating c, Ord c) => V.Vector c -> V.Vector c -> c
 logSum v1 = log . minimumProb . V.sum . V.map exp . V.zipWith (+) v1
 
 minimumProb :: (Floating a, Ord a) => a -> a
@@ -88,15 +88,14 @@ updateReparam nSamp jointF gen obss thetaG betaG thetaN betasN = do
   betaSamples <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
   let
     (joints, gradJoints) = V.unzip $ V.zipWith
-      (\eps th ->
+      (\e th ->
         V.foldl1'
             (\(x1, y1) (x2, y2) -> (x1 + x2, V.zipWith (V.zipWith (+)) y1 y2))
           $ V.map
               (\obs ->
                 let (joints', gradss) = V.unzip $ V.zipWith
-                      (\ob betas -> grad'
-                        (jointF (V.map auto th) (auto ob))
-                        (V.map (\d -> transform d eps) betas)
+                      (\ob betas -> grad' (jointF (V.map auto th) (auto ob))
+                                          (V.map (\d -> transform d e) betas)
                       )
                       obs
                       betass
@@ -205,7 +204,7 @@ mixtureFit xs = runST $ do
   let priorTheta = dirichlet (V.replicate nState 1.0)
   let priorBeta = normalDistr 0 (5 * (fromIntegral nState - 1) :: Double)
   let nSamp      = 10
-  let localStep  = 20
+  let localStep  = (20 :: Int)
 
   -- initialize distribution cells (both invariant and variants)
   let thetaGrad = DistInvariant (fromIntegral $ V.length xs)
@@ -245,9 +244,9 @@ mixtureFit xs = runST $ do
   return (dist thetaF, betaDists)
 
 
-------------------
--- Normal
-------------------
+--------------------------------------
+-- fit simple normal distribution mean
+--------------------------------------
 -- | generate normally distributed data for testing
 genNormal :: ST s (V.Vector Double)
 genNormal = do
@@ -302,3 +301,51 @@ singleUpdateReparam nSamp joint gen qG xsN qN = do
  where
   xs = dist xsN
   q  = dist qN
+
+
+---------------------------
+-- simple dirichlet example
+---------------------------
+-- | generate data for testing the fit to a dirichlet
+genDirichlet :: ST s (V.Vector Int)
+genDirichlet = do
+  gen <- create
+  xs  <- V.replicateM
+    1000
+    (   resample (dirichlet (V.fromList [10.0, 20.0])) gen
+    >>= \cat -> MWCD.categorical (cat :: V.Vector Double) gen
+    )
+  return (xs :: V.Vector Int)
+
+-- | git a dirichlet to samples form a categorical
+dirichletFit :: V.Vector Int -> (Dirichlet, Time)
+dirichletFit xs = runST $ do
+  genG <- create
+  gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+  let priorTheta = dirichlet (V.fromList [1.0, 1.0])
+  let nSamp      = 100
+  qTheta <- cellWith $ mergeGeneric globalMaxStep globalDelta
+  let qInvar = DistInvariant 1 priorTheta (rhoKuc defaultKucP)
+  write qTheta (defaultDistCell priorTheta)
+  (\tP -> watch tP $ \theta' -> do
+      upTh <- dirichletGradProp nSamp gen1 xs qInvar theta'
+      write tP upTh
+    )
+    qTheta
+  thetaF <- unsafeContent qTheta
+  return (dist thetaF, time thetaF)
+
+dirichletGradProp
+  :: Dist a (V.Vector Double)
+  => Int
+  -> GenST s
+  -> V.Vector Int
+  -> DistInvariant a
+  -> DistCell a
+  -> ST s (DistCell a)
+dirichletGradProp nSamp gen xs qInvar diriQ =
+  V.replicateM nSamp (resample diri gen) >>= \samples -> return $ gradientScore
+    qInvar
+    diriQ
+    (1, V.map (\z -> V.sum $ V.map (\i -> log (z V.! i)) xs) samples, samples)
+  where diri = dist diriQ
