@@ -3,6 +3,7 @@ module Statistics.BBVI.Class
   ( DistUtil(..)
   , Dist(..)
   , Differentiable(..)
+  , ParamVector
   )
 where
 
@@ -10,6 +11,7 @@ import qualified Data.Vector                   as V
 import           System.Random.MWC              ( GenST )
 import           Control.Monad.ST               ( ST )
 
+-- | a distribution's parameters, in vector form
 type ParamVector = V.Vector Double
 
 -- | utility functions easing vector arithmetic on gradient updates
@@ -31,7 +33,8 @@ class DistUtil a => Dist a c where
   -- | calculate the gradient of the log probability of a sample under
   -- a distribution, with respect to the parameters. THe location of
   -- parameters' partial derivatives in the vector should match the
-  -- location of the parameters in 'fromParamVector' and 'toParamVector'.
+  -- location of the parameters in 'fromParamVector'
+  -- and 'toParamVector'.
   paramGradOfLogQ ::  a -> c -> ParamVector
 
 -- | minimum necessary functions to calculate reparameterization

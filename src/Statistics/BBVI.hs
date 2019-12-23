@@ -18,6 +18,7 @@ module Statistics.BBVI
   , DistCellss
   , DistInvariant(..)
   , dist
+  , Time
   , time
   , defaultDistCell
   , mergeGeneric

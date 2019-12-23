@@ -3,8 +3,8 @@
 module Statistics.BBVI.Examples
   ( genMixture
   , mixtureFit
-  -- , genNormal
-  -- , normalFit
+  , genNormal
+  , normalFit
   -- , genDirichlet
   -- , dirichletFit
   -- , genMixedMem
@@ -17,6 +17,7 @@ import           Data.Propagator
 import qualified Data.Vector                   as V
 import           Numeric.AD                     ( grad'
                                                 , auto
+                                                , diff
                                                 )
 import           System.Random.MWC              ( create
                                                 , uniform
@@ -35,11 +36,13 @@ minimumProb :: (Floating a, Ord a) => a -> a
 minimumProb = max 1e-308
 
 --- useful global params
+-- for fit
 globalMaxStep :: Int
-globalMaxStep = 100
+globalMaxStep = 10000
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
+-- for generating data
 nDimension :: Int
 nDimension = 1
 nTime :: Int
@@ -203,6 +206,8 @@ mixtureFit xs = runST $ do
   let priorBeta = normalDistr 0 (5 * (fromIntegral nState - 1) :: Double)
   let nSamp      = 10
   let localStep  = 20
+
+  -- initialize distribution cells (both invariant and variants)
   let thetaGrad = DistInvariant (fromIntegral $ V.length xs)
                                 priorTheta
                                 (rhoKuc defaultKucP) --
@@ -221,6 +226,8 @@ mixtureFit xs = runST $ do
         return $ defaultDistCell (normalDistr mu (1.0 :: Double))
       )
     )
+
+  -- attach gradient propagators to cells
   stepTogether
     (updateReparam nSamp (mixtureJoint 1.0) gen1 xs thetaGrad betaGrad)
     qTheta
@@ -230,7 +237,68 @@ mixtureFit xs = runST $ do
   --              (updateScore nSamp (mixtureJoint 1.0) gen1 xs thetaGrad betaGrad)
   --              qTheta
   --              qBetas
+
+  -- pull content (run network to quiesence)
   thetaF <- unsafeContent qTheta
   betaF  <- unsafeContent qBetas
   let betaDists = V.map (V.map dist) betaF
   return (dist thetaF, betaDists)
+
+
+------------------
+-- Normal
+------------------
+-- | generate normally distributed data for testing
+genNormal :: ST s (V.Vector Double)
+genNormal = do
+  gen <- create
+  xs  <- V.replicateM 1000 (resample (normalDistr (5.0 :: Double) 3.0) gen)
+  return xs
+
+-- | log joint of normal distribution
+jointNormal :: Floating a => a -> a -> a -> a
+jointNormal std ob mu = diffableNormalLogProb mu std ob
+
+-- | fit a gaussian using reparam gradient
+normalFit :: Dist (Obs a) SampleDouble => V.Vector a -> (NormalDist, Time)
+normalFit xs = runST $ do
+  genG <- create
+  gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+  let nSamp = 100
+  xProp <- known $ defaultObs xs
+  q     <- cellWith $ mergeGeneric globalMaxStep globalDelta
+  write q (defaultDistCell $ normalDistr 0.0 2.0)
+  let qInvar = DistInvariant (fromIntegral $ V.length xs)
+                             (normalDistr 0.0 2.0)
+                             (rhoKuc defaultKucP)
+
+  (\qP xP -> watch qP $ \q' -> with xP $ \xs' ->
+      singleUpdateReparam nSamp (jointNormal 1.0) gen1 qInvar xs' q' >>= write q
+    )
+    q
+    xProp
+  q' <- unsafeContent q
+  return (dist q', time q')
+
+-- | transform a log joint to a gradient propagator for a single
+-- distribution cell, using reparameterization graidient. TODO: more
+-- work on generalizing these types of functions!
+singleUpdateReparam
+  :: (Dist b SampleDouble, Differentiable c Double)
+  => Int
+  -> (forall  e . (Floating e, Ord e) => e -> e -> e)
+  -> GenST s
+  -> DistInvariant c
+  -> DistCell b
+  -> DistCell c
+  -> ST s (DistCell c)
+singleUpdateReparam nSamp joint gen qG xsN qN = do
+  obs     <- V.replicateM nSamp (resample xs gen)
+  samples <- V.replicateM nSamp (epsilon q gen)
+  let gradJoint = V.map
+        (\mu -> V.sum $ V.map (\ob -> diff (joint (auto ob)) mu) obs)
+        (V.map (transform q) samples)
+  return $ gradientReparam qG qN ((fromIntegral nSamp), gradJoint, samples)
+ where
+  xs = dist xsN
+  q  = dist qN

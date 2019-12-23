@@ -4,6 +4,7 @@ module Statistics.BBVI.Gradient
   ( gradientScore
   , gradientReparam
   , DistInvariant(..)
+  , Samples
   )
 where
 

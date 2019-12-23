@@ -3,6 +3,7 @@ module Statistics.BBVI.StepSize
   ( KucP(..)
   , rhoKuc
   , defaultKucP
+  , Rho
   )
 where
 
@@ -12,7 +13,8 @@ import           Statistics.BBVI.Propagator     ( DistCell(..)
                                                 , Memory
                                                 )
 
--- | step size, vector as same length as n parameters in distribution
+-- | step size is a vector the same length as n parameters in
+-- the distribution
 type Rho = V.Vector Double
 
 -- | calculates a step size following Kucukelbir et al 2017
