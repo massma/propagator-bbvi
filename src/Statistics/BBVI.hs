@@ -28,6 +28,7 @@ module Statistics.BBVI
   , diffableNormalLogProb
 
   -- * dirichlet distribution types and functions
+  , Dirichlet(..)
   , dirichlet
   , alphas
   , defaultObs

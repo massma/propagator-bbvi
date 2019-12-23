@@ -13,14 +13,10 @@ module Statistics.BBVI.Examples
 where
 
 import           Control.Monad.ST
-import           Data.Maybe                     ( fromMaybe )
 import           Data.Propagator
-import           Data.Foldable                  ( concat )
 import qualified Data.Vector                   as V
-import           Numeric.AD                     ( grad
-                                                , grad'
+import           Numeric.AD                     ( grad'
                                                 , auto
-                                                , diff
                                                 )
 import           System.Random.MWC              ( create
                                                 , uniform
@@ -29,7 +25,6 @@ import           System.Random.MWC              ( create
                                                 )
 import qualified System.Random.MWC.Distributions
                                                as MWCD
-import qualified Statistics.Sample             as Samp
 import           Statistics.BBVI
 
 --- helper functions
@@ -55,11 +50,16 @@ nState = 3 -- 10
 -----------------
 --  mixture
 ------------------
+-- | log joint of a mixture model, with categorical marginalized out
 mixtureJoint :: (Floating a, Ord a) => a -> V.Vector a -> a -> V.Vector a -> a
 mixtureJoint std theta ob betas = logSum
   (V.map log theta)
   (V.map (\mu -> diffableNormalLogProb mu std ob) betas)
 
+-- | transform a log joint to a gradient propagator, for use with
+-- models with a mixture-like plate structure. Updates the mixture
+-- components with the reparameterization gradient (Kucukelbir et al
+-- 2017).
 updateReparam
   :: (Dist b SampleVector, Differentiable c Double) -- Dist a SampleVector,
   => Int
@@ -121,6 +121,24 @@ updateReparam nSamp jointF gen obss thetaG betaG thetaN betasN = do
   theta   = dist thetaN
   betass  = V.map (V.map dist) betasN
 
+-- | transform a log joint to a gradient propagator, for use with
+-- models with a mixture-like plate structure. Updates the mixture
+-- components with the score gradient (Ranganath et al 2014)
+updateScore
+  :: (Dist a1 c1, Dist a2 c2)
+  => Int
+  -> (c1 -> a3 -> V.Vector c2 -> Double)
+  -> GenST s
+  -> V.Vector (V.Vector a3)
+  -> DistInvariant a1
+  -> DistInvariant a2
+  -> DistCell a1
+  -> V.Vector (V.Vector (DistCell a2))
+  -> ST
+       s
+       ( DistCell a1
+       , V.Vector (V.Vector (DistCell a2))
+       )
 updateScore nSamp jointF gen obss thetaG betaG thetaN betasN = do
   -- obss        <- V.replicateM nObs (resample xs gen)
   thetaSamp   <- V.replicateM nSamp (resample theta gen)
@@ -156,6 +174,7 @@ updateScore nSamp jointF gen obss thetaG betaG thetaN betasN = do
   theta   = dist thetaN
   betass  = V.map (V.map dist) betasN
 
+-- | generate data for testing mixture model
 genMixture :: ST s (V.Vector (V.Vector Double))
 genMixture = do
   gen <- create
@@ -174,6 +193,9 @@ genMixture = do
   xs <- V.replicateM nTime (V.replicateM nDimension . (mixtures V.!) =<< theta')
   return xs
 
+-- | fit a mixture model, given data
+mixtureFit
+  :: V.Vector (V.Vector Double) -> (Dirichlet, V.Vector (V.Vector NormalDist))
 mixtureFit xs = runST $ do
   genG <- create
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)
@@ -211,14 +233,4 @@ mixtureFit xs = runST $ do
   thetaF <- unsafeContent qTheta
   betaF  <- unsafeContent qBetas
   let betaDists = V.map (V.map dist) betaF
-  return
-    ( alphas (dist thetaF)
-    , time thetaF
-    , Samp.mean . V.map (Samp.mean . V.map (fromIntegral . time)) $ betaF
-    , fmap (\c -> Samp.mean . V.map (mean . (V.! c)) $ betaDists)
-           [0 .. nState - 1]
-    -- , thetaF
-    , fmap (\c -> Samp.mean . V.map (stdDev . (V.! c)) $ betaDists)
-           [0 .. nState - 1]
-    -- , betaF
-    )
+  return (dist thetaF, betaDists)

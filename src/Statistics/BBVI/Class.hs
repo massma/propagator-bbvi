@@ -32,7 +32,7 @@ class DistUtil a => Dist a c where
   -- a distribution, with respect to the parameters. THe location of
   -- parameters' partial derivatives in the vector should match the
   -- location of the parameters in 'fromParamVector' and 'toParamVector'.
-  paramGradOfLogQ ::  a -> c -> ParamVector -- gradient of parameters evauated at some sample of x
+  paramGradOfLogQ ::  a -> c -> ParamVector
 
 -- | minimum necessary functions to calculate reparameterization
 -- gradients (Kucukelbir et al 2017)
@@ -45,4 +45,4 @@ class (Dist a c) => Differentiable a c where
   gradTransform :: a -> c -> ParamVector
   -- | the gradient of the log probability of a sample of \(z\) under
   -- the variational distribution, with respect to \(z\)
-  sampleGradOfLogQ ::  a -> c -> c -- gradient of a sample evaluate with params of q
+  sampleGradOfLogQ ::  a -> c -> c

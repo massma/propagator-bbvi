@@ -35,35 +35,48 @@ type Memory = V.Vector Double
 
 type Time = Int
 
+-- | distribution cell
 data DistCell a
-  = U !Memory !Gradient
-  | Node !Time !Memory !a deriving (Show, Eq, Ord, Read)
+  =
+    U !Memory !Gradient -- ^ update to a disribution node
+  | Node !Time !Memory !a -- ^ distribution node
+  deriving (Show, Eq, Ord, Read)
 
 -- !(Gradient -> DistCell a -> (Memory, Gradient))
 
+-- | helper function for initializing distribution cells takes an
+-- initial point for the distribution and reutrns a DistCell
 defaultDistCell :: DistUtil a => a -> DistCell a
 defaultDistCell d = Node 1 (V.replicate (nParams d) 0) d
 
+-- | time accessor for distribution node
 time :: DistCell a -> Time
 time (Node t _ _) = t
--- time (U{}       ) = error "called time on update propnode!"
+time (U{}       ) = error "called time on update propnode!"
 -- memory (Node _ m _) = m
 
+-- | get the distribution from a distribution node
 dist :: DistCell a -> a
 dist (Node _ _ d) = d
--- dist (U{}       ) = error "called dist on update propnode!"
+dist (U{}       ) = error "called dist on update propnode!"
 
+-- | single cell representing a vector of distribution cells
 type DistCells a = V.Vector (DistCell a)
 
+-- | single cell representing an array (vector of vector) of distribution cells
 type DistCellss a = V.Vector (V.Vector (DistCell a))
 
 mergeGeneric
   :: DistUtil a
-  => Int
-  -> Double
-  -> DistCell a
-  -> DistCell a
+  => Int -- ^ max time steps a cell can gain more information
+  -> Double -- ^ threshold for information to be considered "new"; if
+            -- the l2-norm of change in the distribution's parameters
+            -- is less than this threshold, the cell remains unchanged
+  -> DistCell a -- ^ current cell
+  -> DistCell a -- ^ propsed update to cell
   -> Change (DistCell a)
+-- | how to generic merge for DistCells: useful for customizing
+-- "quiesence" thresholds with cellWith
 mergeGeneric maxStep delta !x1 !x2 = m x1 x2
  where
   m no@(Node t memory d) (U memUp gradUp)
@@ -78,7 +91,7 @@ mergeGeneric maxStep delta !x1 !x2 = m x1 x2
   m (U _ _) _ = Contradiction mempty "Trying to update a gradient"
   -- CAREFUL: below is dangerous if I start doing the ideas i thought
   -- about: changing maxstep and elta node for local optmizations
-  m no1@(Node t1 _m1 d1) no2@(Node t2 m2 d2)
+  m no1@(Node t1 _m1 d1) no2@(Node t2 _m2 d2)
     | t1 >= maxStep
     = Change False no1
     | (t2 > t1)
@@ -87,7 +100,30 @@ mergeGeneric maxStep delta !x1 !x2 = m x1 x2
     | otherwise
     = Change False no1
 
+mergeGenerics
+  :: DistUtil a
+  => Int -- ^ max time steps a cell can gain more information
+  -> Double -- ^ threshold for information to be considered "new"; if
+            -- the l2-norm of change in the distribution's parameters
+            -- is less than this threshold for all distributions, the
+            -- cell remains unchanged
+  -> DistCells a -- ^ current cell
+  -> DistCells a -- ^ propsed update to cell
+  -> Change (DistCells a)
+-- | generalziation of 'mergeGeneric' to cells of vectors of distributions
 mergeGenerics m d x1 x2 = V.sequence . V.zipWith (mergeGeneric m d) x1 $ x2
+-- | generalziation of 'mergeGeneric' to cells of arrays of distributions
+
+mergeGenericss
+  :: DistUtil a
+  => Int -- ^ max time steps a cell can gain more information
+  -> Double -- ^ threshold for information to be considered "new"; if
+            -- the l2-norm of change in the distribution's parameters
+            -- is less than this threshold for all distributions, the
+            -- cell remains unchanged
+  -> DistCellss a -- ^ current cell
+  -> DistCellss a -- ^ propsed update to cell
+  -> Change (DistCellss a)
 mergeGenericss m d v1 v2 = V.sequence . V.zipWith (mergeGenerics m d) v1 $ v2
 
 instance DistUtil a => Propagated (DistCell a) where
