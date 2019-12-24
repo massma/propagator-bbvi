@@ -7,8 +7,8 @@ module Statistics.BBVI.Examples
   , normalFit
   , genDirichlet
   , dirichletFit
-  -- , genMixedMem
-  -- , mixedMemFit
+  , genMixedMem
+  , mixedMemFit
   )
 where
 
@@ -38,7 +38,7 @@ minimumProb = max 1e-308
 --- useful global params
 -- for fit
 globalMaxStep :: Int
-globalMaxStep = 10000
+globalMaxStep = 1000
 globalDelta :: Double
 globalDelta = 1e-16 -- 0.00001 --
 
@@ -349,3 +349,208 @@ dirichletGradProp nSamp gen xs qInvar diriQ =
     diriQ
     (1, V.map (\z -> V.sum $ V.map (\i -> log (z V.! i)) xs) samples, samples)
   where diri = dist diriQ
+
+----------------------
+-- mixed membership
+----------------------
+
+-- | transform a log joint to a gradient propagator, for use with
+-- models with a mixed-membership-like plate structure. Updates the
+-- mixture components with the reparameterization gradient (Kucukelbir
+-- et al 2017). TODO : generalize all these joint transformer
+-- functions better around the idea of plates
+updateMembershipReparam
+  :: (Dist b SampleVector, Differentiable c Double) -- Dist a SampleVector,
+  => Int
+  -> (  forall e
+      . (Floating e, Ord e)
+     => V.Vector e
+     -> e
+     -> V.Vector e
+     -> e
+     )
+  -> GenST s
+  -> V.Vector (V.Vector Double)
+  -> DistInvariant b
+  -> DistInvariant c
+  -> V.Vector (DistCell b)
+  -> V.Vector (V.Vector (DistCell c))
+  -> ST
+       s
+       ( V.Vector (DistCell b)
+       , V.Vector (V.Vector (DistCell c))
+       )
+updateMembershipReparam nSamp jointF gen obss thetaG betaG thetaN betasN = do
+  thetaSamples <- V.replicateM nSamp (V.mapM (\th -> resample th gen) thetas)
+  betaSamples  <- V.replicateM nSamp (epsilon ((betass V.! 0) V.! 0) gen)
+  let (joints, gradJoints) = V.unzip $ V.zipWith
+        (\e ths -> V.unzip $ V.zipWith
+          (\obs th ->
+            let (joints', gradss) = V.unzip $ V.zipWith
+                  (\ob betas -> grad' (jointF (V.map auto th) (auto ob))
+                                      (V.map (\d -> transform d e) betas)
+                  )
+                  obs
+                  betass
+            in  (V.sum joints', gradss)
+          )
+          (obss :: V.Vector (V.Vector Double))
+          ths
+        )
+        betaSamples
+        thetaSamples
+  return
+    $ ( V.imap
+        (\i thN -> gradientScore
+          thetaG
+          thN
+          (nFactor, V.map (V.! i) joints, (V.map (V.! i) thetaSamples))
+        )
+        thetaN
+      , V.imap
+        (\dim v -> V.imap
+          (\c d -> gradientReparam
+            betaG
+            d
+            ( nFactor
+            , V.map (V.sum . V.map ((V.! c) . (V.! dim))) gradJoints
+            , betaSamples
+            )
+          )
+          v
+        )
+        betasN
+      )
+ where
+  nFactor = fromIntegral $ V.length obss
+  thetas  = V.map dist thetaN
+  betass  = V.map (V.map dist) betasN
+
+
+-- | transform a log joint to a gradient propagator, for use with
+-- models with a mixed membership-like plate structure. Updates the
+-- mixture components with the score gradient (Ranganath et al
+-- 2014). TODO: generalize these log joint to gradient propagator
+-- transformer functions
+updateMembershipScore
+  :: (Dist a1 c1, Dist a2 c2)
+  => Int
+  -> (c1 -> a3 -> V.Vector c2 -> Double)
+  -> GenST s
+  -> V.Vector (V.Vector a3)
+  -> DistInvariant a1
+  -> DistInvariant a2
+  -> V.Vector (DistCell a1)
+  -> V.Vector (V.Vector (DistCell a2))
+  -> ST
+       s
+       ( V.Vector (DistCell a1)
+       , V.Vector (V.Vector (DistCell a2))
+       )
+updateMembershipScore nSamp jointF gen obss thetaG betaG thetasN betasN = do
+  -- obss        <- V.replicateM nObs (resample xs gen)
+  thetaSamples <- V.replicateM nSamp
+                               (V.mapM (\theta -> resample theta gen) thetas)
+  betaSamples <- V.replicateM nSamp
+                              (V.mapM (V.mapM (\b -> resample b gen)) betass)
+  let joints = V.zipWith
+        (\thetas' betass' ->
+          V.zipWith (\obs theta -> V.zipWith (jointF theta) obs betass') obss
+            $ thetas'
+        )
+        thetaSamples
+        betaSamples
+  return
+    $ ( V.imap
+        (\i thetaN -> gradientScore
+          thetaG
+          thetaN
+          (nFactor, V.map (V.sum . (V.! i)) joints, V.map (V.! i) thetaSamples)
+        )
+        thetasN
+      , V.imap
+        (\dim v -> V.imap
+          (\c d -> gradientScore
+            betaG
+            d
+            ( nFactor
+            , V.map (V.sum . V.map (V.! dim)) joints
+            , V.map ((V.! c) . (V.! dim)) betaSamples
+            )
+          )
+          v
+        )
+        betasN
+      )
+ where
+  -- xs     = dist xsN
+  nFactor = fromIntegral $ V.length obss
+  thetas  = V.map dist thetasN
+  betass  = V.map (V.map dist) betasN
+
+
+genMixedMem :: ST s (V.Vector (V.Vector (Double))) -- Maybe Double
+genMixedMem = do
+  gen <- create
+  -- initialize dirichlet that favors sparse categoricals
+  let diriParam  = 0.01
+  let thetaParam = MWCD.dirichlet (V.replicate nState diriParam) gen
+  thetasTrue <- V.replicateM nTime thetaParam
+  let thetas' = V.map (\theta' -> MWCD.categorical theta' gen) thetasTrue
+  let betaStd = 0.001
+  let betas' = V.generate
+        nState
+        (\k -> V.replicate
+          nDimension
+          (MWCD.normal
+            ((fromIntegral k - (fromIntegral (nState - 1) * 0.5)) * 5)
+            betaStd
+            gen
+          )
+        )
+  xs <- V.generateM
+    nTime
+    (\day -> V.generateM
+      nDimension
+      (\loc -> (thetas' V.! day) >>= \z -> ((betas' V.! z) V.! loc)) -- Just <$>
+    )
+  return xs
+
+mixedMemFit xs = runST $ do
+  genG <- create
+  gen1 <- initialize =<< V.replicateM 256 (uniform genG)
+  let priorTheta = dirichlet (V.replicate nState 1.0)
+  let priorBeta = normalDistr 0 (5 * (fromIntegral nState - 1) :: Double)
+  let nSamp      = 10
+  -- let localStep  = 20
+  let betaGrad = DistInvariant (fromIntegral $ V.length xs)
+                               priorBeta
+                               (rhoKuc defaultKucP)
+  qBetas <- cellWith $ mergeGenericss globalMaxStep globalDelta
+  write qBetas =<< V.generateM
+    nDimension
+    (\_i -> V.replicateM
+      nState
+      (do
+        mu <- resample priorBeta gen1
+        return $ defaultDistCell (normalDistr mu 1.0)
+      )
+    )
+  qThetas <- cellWith $ mergeGenerics globalMaxStep globalDelta
+  write qThetas $ V.replicate nTime (defaultDistCell priorTheta)
+  let thetaGrad = DistInvariant (fromIntegral $ V.length xs)
+                                priorTheta
+                                (rhoKuc defaultKucP)
+  stepTogether
+    (updateMembershipReparam nSamp (mixtureJoint 1.0) gen1 xs thetaGrad betaGrad
+    )
+    qThetas
+    qBetas
+  -- stepSeparate localStep
+  --              globalDelta
+  --              (updateMembershipScore nSamp (mixtureJoint 1.0) gen1 xs thetaGrad betaGrad)
+  --              qThetas
+  --              qBetas
+  thetaF <- unsafeContent qThetas
+  betaF  <- unsafeContent qBetas
+  return (V.map dist thetaF, V.map (V.map dist) betaF)

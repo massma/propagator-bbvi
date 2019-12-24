@@ -24,8 +24,7 @@ import           Statistics.BBVI.Class
 import qualified Data.Vector                   as V
 import           Data.Propagator
 
--- | a sample with a vector type e.g. categorical sampled from a
--- dirichlet
+-- | a sample with a vector type e.g. sample from a dirichlet
 type SampleVector = V.Vector Double
 
 -- | a sample with a real type e.g. number sampled from a gaussian
