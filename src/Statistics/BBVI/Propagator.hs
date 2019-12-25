@@ -34,29 +34,33 @@ type Gradient = V.Vector Double
 
 type Memory = V.Vector Double
 
+-- | number of times a distribution cell has been updated
 type Time = Int
 
 -- | distribution cell
 data DistCell a
   =
-    U !Memory !Gradient -- ^ update to a disribution node
-  | Node !Time !Memory !a -- ^ distribution node of type a
+    U !Memory !Gradient -- ^ update to a distribution cell
+  | Node !Time !Memory !a -- ^ distribution cell with a distribution
+                          -- of type a
   deriving (Show, Eq, Ord, Read)
 
 -- !(Gradient -> DistCell a -> (Memory, Gradient))
 
--- | helper function for initializing distribution cells takes an
--- initial point for the distribution and reutrns a DistCell
-defaultDistCell :: DistUtil a => a -> DistCell a
+-- | helper function for initializing distribution cells
+defaultDistCell
+  :: DistUtil a
+  => a -- ^ initial point for distribution
+  -> DistCell a -- ^ distribution cell
 defaultDistCell d = Node 1 (V.replicate (nParams d) 0) d
 
--- | time accessor for distribution node
+-- | time accessor for a distribution cell
 time :: DistCell a -> Time
 time (Node t _ _) = t
 time (U{}       ) = error "called time on update propnode!"
 -- memory (Node _ m _) = m
 
--- | get the distribution from a distribution node
+-- | distribution accessor for a distribution cell
 dist :: DistCell a -> a
 dist (Node _ _ d) = d
 dist (U{}       ) = error "called dist on update propnode!"
@@ -67,17 +71,18 @@ type DistCells a = V.Vector (DistCell a)
 -- | single cell representing an array (vector of vector) of distribution cells
 type DistCellss a = V.Vector (V.Vector (DistCell a))
 
+-- | generic merge for DistCells: useful for customizing
+-- "quiesence" thresholds with cellWith
 mergeGeneric
   :: DistUtil a
-  => Int -- ^ max time steps a cell can gain more information
+  => Time -- ^ maximum number of updates to a cell
   -> Double -- ^ threshold for information to be considered "new"; if
-            -- the l2-norm of change in the distribution's parameters
-            -- is less than this threshold, the cell remains unchanged
+            -- the l2-norm of the change in the distribution's
+            -- parameters is less than this threshold, the cell
+            -- remains unchanged
   -> DistCell a -- ^ current cell
-  -> DistCell a -- ^ propsed update to cell
+  -> DistCell a -- ^ proposed update to cell
   -> Change (DistCell a)
--- | how to generic merge for DistCells: useful for customizing
--- "quiesence" thresholds with cellWith
 mergeGeneric maxStep delta !x1 !x2 = m x1 x2
  where
   m no@(Node t memory d) (U memUp gradUp)
@@ -104,26 +109,26 @@ mergeGeneric maxStep delta !x1 !x2 = m x1 x2
 -- | generalization of 'mergeGeneric' to cells of vectors of distributions
 mergeGenerics
   :: DistUtil a
-  => Int -- ^ max time steps a cell can gain more information
+  => Time -- ^ maximum number of updates to the cells
   -> Double -- ^ threshold for information to be considered "new"; if
             -- the l2-norm of change in the distribution's parameters
             -- is less than this threshold for all distributions, the
             -- cell remains unchanged
-  -> DistCells a -- ^ current cell
-  -> DistCells a -- ^ propsed update to cell
+  -> DistCells a -- ^ current cells
+  -> DistCells a -- ^ proposed update to cells
   -> Change (DistCells a)
 mergeGenerics m d x1 x2 = V.sequence . V.zipWith (mergeGeneric m d) x1 $ x2
 
 -- | generalization of 'mergeGeneric' to cells of arrays of distributions
 mergeGenericss
   :: DistUtil a
-  => Int -- ^ max time steps a cell can gain more information
+  => Time -- ^ maximum number of updates to the cells
   -> Double -- ^ threshold for information to be considered "new"; if
             -- the l2-norm of change in the distribution's parameters
             -- is less than this threshold for all distributions, the
             -- cell remains unchanged
   -> DistCellss a -- ^ current cell
-  -> DistCellss a -- ^ propsed update to cell
+  -> DistCellss a -- ^ proposed update to cell
   -> Change (DistCellss a)
 mergeGenericss m d v1 v2 = V.sequence . V.zipWith (mergeGenerics m d) v1 $ v2
 

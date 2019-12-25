@@ -20,11 +20,15 @@ type Samples = V.Vector
 
 -- | invariant data for a variational distribution cell
 data DistInvariant a = DistInvariant { weight :: !Double
-                                     -- ^ total occurences of z in log likelihood
+                                     -- ^ total occurences of z in log
+                                     -- likelihood
                                      , prior :: !a
                                      -- ^ prior on latent variable
-                                     , rhoF :: !(Gradient -> DistCell a -> (Memory, V.Vector Double))
-                                     -- ^ calculates change in memory and setpsize
+                                     , rhoF :: !(Gradient ->
+                                                 DistCell a ->
+                                                 (Memory, V.Vector Double))
+                                     -- ^ calculates change in memory,
+                                     -- and stepsize
                                      }
 
 -- | internal helper function for building gradient propagators
@@ -53,7 +57,8 @@ gradientScore
   => DistInvariant a
   -> DistCell a -- ^ current variational distribution
   -> (Double, V.Vector Double, Samples c)   -- ^ n factors in log
-  -- joint, log joint, samples (corresponding ot each log joint)
+  -- joint calculation, log joint calculation on each sample of \(z\),
+  -- samples
   -> DistCell a -- ^ update to variational distribution
 gradientScore gp@(DistInvariant {..}) = gradient f gp
  where
@@ -70,8 +75,8 @@ gradientReparam
   => DistInvariant a
   -> DistCell a -- ^ current variational distribution
   -> (Double, V.Vector Double, Samples Double)
-  -- ^ n factors in log joint, gradient of joint wrt z, samples
-  -- (corresponding ot each gradient)
+  -- ^ n factors in log joint calculation, gradient of joint wrt \(z\)
+  -- for each sample, un-transformed samples
   -> DistCell a -- ^ update to variational distribution
 gradientReparam gp@(DistInvariant {..}) = gradient f gp
  where

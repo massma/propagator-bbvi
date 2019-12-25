@@ -489,6 +489,7 @@ updateMembershipScore nSamp jointF gen obss thetaG betaG thetasN betasN = do
   betass  = V.map (V.map dist) betasN
 
 
+-- | generate data for testing a Gaussian mixed membership model
 genMixedMem :: ST s (V.Vector (V.Vector (Double))) -- Maybe Double
 genMixedMem = do
   gen <- create
@@ -516,6 +517,10 @@ genMixedMem = do
     )
   return xs
 
+-- | fit a Gaussian mixed membership model to data
+mixedMemFit
+  :: V.Vector (V.Vector Double)
+  -> (V.Vector Dirichlet, V.Vector (V.Vector NormalDist))
 mixedMemFit xs = runST $ do
   genG <- create
   gen1 <- initialize =<< V.replicateM 256 (uniform genG)

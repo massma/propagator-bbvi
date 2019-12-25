@@ -14,7 +14,7 @@ import           Control.Monad.ST               ( ST )
 -- | a distribution's parameters, in vector form
 type ParamVector = V.Vector Double
 
--- | utility functions easing vector arithmetic on gradient updates
+-- | utility methods easing vector arithmetic on gradient updates
 class DistUtil a where
   -- | build a distribution from a vector of parameters
   fromParamVector :: ParamVector -> a
@@ -23,7 +23,7 @@ class DistUtil a where
   -- | provide the number of parameters of a distribution
   nParams :: a -> Int
 
--- | minimum necessary functions to calculate score gradients
+-- | minimum necessary methods to calculate score gradients
 -- (Ranganath et al 2014)
 class DistUtil a => Dist a c where
   -- | generate a sample from a distribution
@@ -37,7 +37,7 @@ class DistUtil a => Dist a c where
   -- and 'toParamVector'.
   paramGradOfLogQ ::  a -> c -> ParamVector
 
--- | minimum necessary functions to calculate reparameterization
+-- | minimum necessary methods to calculate reparameterization
 -- gradients (Kucukelbir et al 2017)
 class (Dist a c) => Differentiable a c where
   -- | generate an un-transformed sample

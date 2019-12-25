@@ -17,7 +17,8 @@ import           Statistics.BBVI.Propagator     ( Time
                                                 , mergeGeneric
                                                 , mergeGenericss
                                                 )
--- | partial function to pull content from cell
+
+-- | helper (partial) function to pull content from cell
 unsafeContent :: Cell s a -> ST s a
 unsafeContent =
   (fromMaybe (error "called unsafe content but no content in cell") <$>)

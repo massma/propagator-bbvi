@@ -40,10 +40,10 @@ module Statistics.BBVI
   , Dirichlet(..)
   , dirichlet
   , alphas
-  , defaultObs
 
   -- * resample observations with a propagator
   , Obs(..)
+  , defaultObs
 
   -- * helper functions for transforming the log joint into gradient propagators
   , gradientScore

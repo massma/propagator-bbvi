@@ -21,7 +21,8 @@ type Rho = V.Vector Double
 rhoKuc
   :: KucP -- ^ parameters
   -> Gradient -- ^ gradient at time t
-  -> DistCell a -- ^ distribution cell (for memory)
+  -> DistCell a -- ^ distribution cell (needed for memory data
+                -- e.g. \( s_{t-1} \) in Kucukelbir et al 2017)
   -> (Memory, Rho) -- ^ change in memory, stepsize
 rhoKuc KucP {..} gra (Node time memory _dist) =
   ( deltaM
