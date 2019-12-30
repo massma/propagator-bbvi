@@ -31,7 +31,7 @@ class DistUtil a => Dist a c where
   -- | calculate the log probability (or density) of a sample under a distribution
   logProb :: a -> c -> Double
   -- | calculate the gradient of the log probability of a sample under
-  -- a distribution, with respect to the parameters. THe location of
+  -- a distribution, with respect to the parameters. The location of
   -- parameters' partial derivatives in the vector should match the
   -- location of the parameters in 'fromParamVector'
   -- and 'toParamVector'.

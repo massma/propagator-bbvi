@@ -148,11 +148,10 @@ mean and variance), a \textit{time} integer corresponding to the
 number of times the variational factor has been updated, and a
 \textit{memory} vector equal in length to the number of parameters of
 the variational factor (e.g. in the case of the Gaussian, a vector of
-length 2). The \textit{time} and \textit{memory} data are useful
-for step size calculations. For example, in \citet{kuc-2017} the step
-size parameterization uses both the number of gradient update
-interactions, as well as a quantity determined by the history of
-gradient magnitudes.
+length 2). The \textit{time} and \textit{memory} data are useful for
+step size calculations. For example, in \citet{kuc-2017} the step size
+parameterization uses both the number of gradient update steps, as
+well as a quantity determined by the history of gradient magnitudes.
 
 In addition to the information stored in variational factor cells,
 invariant data are also defined for each variational factor. These
