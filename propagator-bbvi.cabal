@@ -1,0 +1,85 @@
+cabal-version: 1.12
+
+name:           propagator-bbvi
+version:        0.1.0.0
+description:    Please see the README on GitHub at <https://github.com/massma/propagator-bbvi#readme>
+homepage:       https://github.com/massma/propagator-bbvi#readme
+bug-reports:    https://github.com/massma/propagator-bbvi/issues
+author:         Adam Massmann
+maintainer:     akm2203@columbia.edu
+copyright:      Copyright (c) 2019 Adam Massmann &lt;akm2203@columbia.edu&gt;
+license:        BSD3
+license-file:   LICENSE
+build-type:     Simple
+extra-source-files:
+    readme.org
+
+source-repository head
+  type: git
+  location: https://github.com/massma/propagator-bbvi
+
+library
+  exposed-modules:
+      Statistics.BBVI
+      Statistics.BBVI.Class
+      Statistics.BBVI.Distribution.Dirichlet
+      Statistics.BBVI.Distribution.Normal
+      Statistics.BBVI.Examples
+      Statistics.BBVI.Gradient
+      Statistics.BBVI.Observed
+      Statistics.BBVI.Propagator
+      Statistics.BBVI.Scheduler
+      Statistics.BBVI.StepSize
+  other-modules:
+      Paths_propagator_bbvi
+  hs-source-dirs:
+      src
+  build-depends:
+      ad
+    , base >=4.7 && <5
+    , math-functions
+    , mwc-random
+    , primitive
+    , propagators
+    , statistics
+    , vector
+  default-language: Haskell2010
+
+executable propagator-bbvi-exe
+  main-is: Main.hs
+  other-modules:
+      Paths_propagator_bbvi
+  hs-source-dirs:
+      app
+  ghc-options: -threaded -rtsopts -O2 "-with-rtsopts=-N4 -M10000m"
+  build-depends:
+      ad
+    , base >=4.7 && <5
+    , math-functions
+    , mwc-random
+    , primitive
+    , propagator-bbvi
+    , propagators
+    , statistics
+    , vector
+  default-language: Haskell2010
+
+test-suite propagator-bbvi-test
+  type: exitcode-stdio-1.0
+  main-is: Spec.hs
+  other-modules:
+      Paths_propagator_bbvi
+  hs-source-dirs:
+      test
+  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  build-depends:
+      ad
+    , base >=4.7 && <5
+    , math-functions
+    , mwc-random
+    , primitive
+    , propagator-bbvi
+    , propagators
+    , statistics
+    , vector
+  default-language: Haskell2010
